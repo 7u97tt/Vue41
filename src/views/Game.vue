@@ -52,12 +52,24 @@
             {{ formatProfitRate(profitRate) }}
           </span>
         </div>
-        <div v-if="eventProbability !== null" class="stat-item">
-          <span class="stat-label">突发事件概率</span>
-          <span class="stat-value">{{ eventProbability }}%</span>
-        </div>
       </div>
       <div class="asset-actions">
+        <button
+          type="button"
+          class="btn-primary"
+          :class="{ active: currentBView === 'broker' && currentSubPage === 'stock' }"
+          @click="openBrokerView"
+        >
+          券商
+        </button>
+        <button
+          type="button"
+          class="btn-primary"
+          :class="{ active: currentBView === 'operateLog' && currentSubPage === 'stock' }"
+          @click="openOperateLogView"
+        >
+          操作日志
+        </button>
         <button
           type="button"
           class="btn-primary"
@@ -139,25 +151,159 @@
           </div>
 
           <div class="b-area card">
-            <template v-if="currentBView === 'newsLog'">
+            <template v-if="currentBView === 'broker'">
+              <button type="button" class="back-btn" @click="backToStockList">← 返回</button>
+              <h2 class="panel-title">券商 · 融券做空</h2>
+
+              <section class="broker-section">
+                <h3 class="broker-subtitle">借券</h3>
+                <div class="broker-borrow-row">
+                  <label class="modal-label" for="brokerStockSelect">选择股票</label>
+                  <select
+                    id="brokerStockSelect"
+                    v-model="brokerBorrowStockCode"
+                    class="broker-select"
+                    @change="onBrokerStockChange"
+                  >
+                    <option value="">请选择</option>
+                    <option v-for="s in STOCK_CATALOG" :key="s.code" :value="s.code">
+                      {{ s.name }} ({{ s.code }})
+                    </option>
+                  </select>
+                </div>
+                <p v-if="brokerBorrowStockCode" class="modal-hint">
+                  券商剩余可借：{{ brokerCanBorrow === null ? '—' : brokerCanBorrow }} 股
+                </p>
+                <div class="broker-borrow-row">
+                  <label class="modal-label" for="brokerBorrowQty">借券股数</label>
+                  <input
+                    id="brokerBorrowQty"
+                    v-model="brokerBorrowQtyInput"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="modal-input"
+                    placeholder="请输入借券股数"
+                  />
+                </div>
+                <p v-if="brokerFormError" class="modal-error">{{ brokerFormError }}</p>
+                <button type="button" class="btn-primary broker-action-btn" @click="submitBorrowStock">
+                  借股票
+                </button>
+              </section>
+
+              <section class="broker-section">
+                <h3 class="broker-subtitle">我的做空持仓</h3>
+                <p v-if="shortInfoLoading" class="hold-empty">加载中…</p>
+                <p v-else-if="!shortInfoList.length" class="hold-empty">暂无融券负债</p>
+                <div v-else class="hold-table-wrap">
+                  <ElTable :data="shortInfoList" stripe class="hold-el-table broker-short-table">
+                    <ElTableColumn label="股票代码" min-width="96">
+                      <template #default="{ row }">
+                        <button
+                          type="button"
+                          class="btn-link stock-code-link"
+                          @click.stop="openStockDetailByCode(row.stockCode)"
+                        >
+                          {{ row.stockCode }}
+                        </button>
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn prop="shortCount" label="借入总股数" min-width="100" align="right" />
+                    <ElTableColumn prop="shortSoldCount" label="已卖出股数" min-width="100" align="right" />
+                    <ElTableColumn label="借券基准价" min-width="100" align="right">
+                      <template #default="{ row }">
+                        {{ formatMoney(row.borrowPrice) }}
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn label="借券基准总额" min-width="120" align="right">
+                      <template #default="{ row }">
+                        {{ formatMoney(row.borrowBaseTotal) }}
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn label="操作" min-width="200" fixed="right">
+                      <template #default="{ row }">
+                        <button
+                          type="button"
+                          class="btn-link"
+                          :disabled="!row.notSoldCount"
+                          @click="openBrokerShortSellModal(row)"
+                        >
+                          融券卖出
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-link btn-link-warn"
+                          :disabled="!row.shortSoldCount"
+                          @click="openBrokerReturnModal(row)"
+                        >
+                          归还平仓
+                        </button>
+                      </template>
+                    </ElTableColumn>
+                  </ElTable>
+                </div>
+              </section>
+            </template>
+
+            <template v-else-if="currentBView === 'operateLog'">
+              <button type="button" class="back-btn" @click="backToStockList">← 返回</button>
+              <h2 class="panel-title">操作日志</h2>
+              <div class="news-log-panel">
+                <p v-if="operateLogLoading" class="hold-empty news-log-loading">加载中…</p>
+                <p v-else-if="!operateLogList.length" class="hold-empty">暂无操作记录</p>
+                <div v-else class="hold-table-wrap">
+                  <ElTable :data="operateLogList" stripe class="hold-el-table">
+                    <ElTableColumn prop="gameDate" label="游戏日期" min-width="100" />
+                    <ElTableColumn prop="gameTime" label="游戏时间" min-width="88" />
+                    <ElTableColumn prop="operateType" label="操作类型" min-width="100" />
+                    <ElTableColumn prop="stockCode" label="股票代码" min-width="96" />
+                    <ElTableColumn label="资金流向" min-width="88" align="center">
+                      <template #default="{ row }">
+                        <span :class="fundDirectionClass(row.fundDirection)">
+                          {{ fundDirectionLabel(row.fundDirection) }}
+                        </span>
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn label="变动金额" min-width="100" align="right">
+                      <template #default="{ row }">
+                        {{ formatMoney(row.changeMoney) }}
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn label="操作后可用金钱" min-width="120" align="right">
+                      <template #default="{ row }">
+                        {{ formatMoney(row.afterMoney) }}
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn prop="remark" label="操作备注" min-width="200" show-overflow-tooltip />
+                  </ElTable>
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="currentBView === 'newsLog'">
               <button type="button" class="back-btn" @click="backToStockList">← 返回</button>
               <h2 class="panel-title">突发事件新闻</h2>
-              <p v-if="newsLogLoading" class="hold-empty">加载中…</p>
-              <p v-else-if="!newsLogList.length" class="hold-empty">暂无突发事件新闻</p>
-              <div v-else class="hold-table-wrap">
-                <ElTable :data="newsLogList" stripe class="hold-el-table">
-                  <ElTableColumn prop="gameDate" label="游戏日期" min-width="110" />
-                  <ElTableColumn prop="gameTime" label="游戏时间" min-width="90" />
-                  <ElTableColumn prop="stockCode" label="股票代码" min-width="100" />
-                  <ElTableColumn prop="eventTitle" label="事件标题" min-width="140" />
-                  <ElTableColumn label="涨跌幅" min-width="100" align="right">
-                    <template #default="{ row }">
-                      <span :class="changeClass(Number(row.changeRate) * 100)">
-                        {{ formatEventChangeRate(row.changeRate) }}
-                      </span>
-                    </template>
-                  </ElTableColumn>
-                </ElTable>
+              <div class="news-log-panel">
+                <p v-if="newsLogLoading" class="hold-empty news-log-loading">加载中…</p>
+                <p v-else-if="!newsLogList.length" class="hold-empty">
+                  暂无突发事件新闻
+                </p>
+                <div v-else class="hold-table-wrap">
+                  <ElTable :data="newsLogList" stripe class="hold-el-table">
+                    <ElTableColumn prop="gameDate" label="游戏日期" min-width="110" />
+                    <ElTableColumn prop="gameTime" label="游戏时间" min-width="90" />
+                    <ElTableColumn prop="stockCode" label="股票代码" min-width="100" />
+                    <ElTableColumn prop="eventTitle" label="事件标题" min-width="140" />
+                    <ElTableColumn label="涨跌幅" min-width="100" align="right">
+                      <template #default="{ row }">
+                        <span :class="changeClass(Number(row.changeRate) * 100)">
+                          {{ formatEventChangeRate(row.changeRate) }}
+                        </span>
+                      </template>
+                    </ElTableColumn>
+                  </ElTable>
+                </div>
               </div>
             </template>
 
@@ -175,7 +321,7 @@
                   <ElTableColumn prop="stockName" label="股票名称" min-width="100" />
                   <ElTableColumn prop="stockCode" label="股票代码" min-width="90" />
                   <ElTableColumn prop="holdCount" label="持股数量" min-width="88" align="right" />
-                  <ElTableColumn label="买入成本价" min-width="100" align="right">
+                  <ElTableColumn label="买入成本价（平均）" min-width="130" align="right">
                     <template #default="{ row }">
                       {{ formatMoney(row.buyCostPrice) }}
                     </template>
@@ -465,6 +611,54 @@
       </div>
     </div>
 
+    <div
+      v-if="brokerShortSellModal"
+      class="modal-overlay"
+      @click.self="closeBrokerModals"
+    >
+      <div class="modal-card">
+        <h3 class="modal-title">融券卖出 — {{ brokerShortSellModal.stockCode }}</h3>
+        <p class="modal-hint">未卖出借券：{{ brokerShortSellModal.notSoldCount }} 股</p>
+        <p class="modal-hint">当前股价：¥ {{ brokerModalUnitPrice.toFixed(2) }}</p>
+        <label class="modal-label">卖出股数</label>
+        <input v-model="brokerModalQtyInput" type="number" class="modal-input" min="1" step="1" />
+        <p class="modal-hint">成交总额：¥ {{ formatMoney(brokerShortTradeTotal) }}</p>
+        <p class="modal-hint">手续费（0.3%）：¥ {{ formatMoney(brokerShortHandFee) }}</p>
+        <p class="modal-hint modal-hint-strong">实际到手：¥ {{ formatMoney(brokerShortNetReceived) }}</p>
+        <p v-if="brokerModalError" class="modal-error">{{ brokerModalError }}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-cancel" @click="closeBrokerModals">取消</button>
+          <button type="button" class="btn-modal-confirm btn-sell" @click="confirmShortSell">
+            确认卖出
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="brokerReturnModal"
+      class="modal-overlay"
+      @click.self="closeBrokerModals"
+    >
+      <div class="modal-card">
+        <h3 class="modal-title">归还平仓 — {{ brokerReturnModal.stockCode }}</h3>
+        <p class="modal-hint">已卖出可还：{{ brokerReturnModal.shortSoldCount }} 股</p>
+        <p class="modal-hint">当前股价：¥ {{ brokerModalUnitPrice.toFixed(2) }}</p>
+        <label class="modal-label">归还股数</label>
+        <input v-model="brokerModalQtyInput" type="number" class="modal-input" min="1" step="1" />
+        <p class="modal-hint">平仓总花费：¥ {{ formatMoney(brokerReturnTradeTotal) }}</p>
+        <p class="modal-hint">手续费（0.3%）：¥ {{ formatMoney(brokerReturnHandFee) }}</p>
+        <p class="modal-hint modal-hint-strong">合计扣款：¥ {{ formatMoney(brokerReturnActualDebit) }}</p>
+        <p v-if="brokerModalError" class="modal-error">{{ brokerModalError }}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-cancel" @click="closeBrokerModals">取消</button>
+          <button type="button" class="btn-modal-confirm btn-buy" @click="confirmReturnStock">
+            确认归还
+          </button>
+        </div>
+      </div>
+    </div>
+
     <ElDialog
       v-model="eventDialogVisible"
       :title="eventDialogTitle"
@@ -542,11 +736,26 @@ const totalProfit = ref(0)
 const profitRate = ref(null)
 const currentSubPage = ref('stock')
 const currentIndustry = ref('daily')
-/** B 区视图：stockList | stockDetail | holdList | newsLog */
+/** B 区视图：stockList | stockDetail | holdList | newsLog | broker | operateLog */
 const currentBView = ref('stockList')
 const holdTableData = ref([])
+/** 突发事件新闻列表，仅来自 GET /api/event/getUserRecentEvent */
 const newsLogList = ref([])
 const newsLogLoading = ref(false)
+/** 操作日志，仅来自 GET /api/log/getOperateLog */
+const operateLogList = ref([])
+const operateLogLoading = ref(false)
+
+const shortInfoList = ref([])
+const shortInfoLoading = ref(false)
+const brokerBorrowStockCode = ref('')
+const brokerBorrowQtyInput = ref('')
+const brokerCanBorrow = ref(null)
+const brokerFormError = ref('')
+const brokerShortSellModal = ref(null)
+const brokerReturnModal = ref(null)
+const brokerModalQtyInput = ref('')
+const brokerModalError = ref('')
 
 const eventDialogVisible = ref(false)
 const eventDialogTitle = ref('重大突发新闻')
@@ -561,7 +770,6 @@ const leverageValue = ref(1)
 
 const holdings = ref([])
 const stocksByIndustry = ref({})
-const eventProbability = ref(null)
 
 let timeTimer = null
 let gameTimer = null
@@ -707,6 +915,44 @@ const modalUnitPrice = computed(() => {
   chartRevision.value
   return resolveDetailPrice()
 })
+
+const brokerModalStockCode = computed(() =>
+  brokerShortSellModal.value?.stockCode || brokerReturnModal.value?.stockCode || '',
+)
+
+const brokerModalUnitPrice = computed(() => {
+  chartRevision.value
+  const code = brokerModalStockCode.value
+  if (!code) return 0
+  const p = getLatestPrice(code)
+  return p > 0 ? p : 0
+})
+
+const brokerModalQtyParsed = computed(() => {
+  const raw = String(brokerModalQtyInput.value ?? '').trim()
+  if (!POSITIVE_INT_REG.test(raw)) return 0
+  return Number(raw)
+})
+
+const brokerShortTradeTotal = computed(() =>
+  brokerModalUnitPrice.value * brokerModalQtyParsed.value,
+)
+const brokerShortHandFee = computed(() =>
+  +(brokerShortTradeTotal.value * BUY_HAND_FEE_RATE).toFixed(2),
+)
+const brokerShortNetReceived = computed(() =>
+  +(brokerShortTradeTotal.value - brokerShortHandFee.value).toFixed(2),
+)
+
+const brokerReturnTradeTotal = computed(() =>
+  brokerModalUnitPrice.value * brokerModalQtyParsed.value,
+)
+const brokerReturnHandFee = computed(() =>
+  +(brokerReturnTradeTotal.value * BUY_HAND_FEE_RATE).toFixed(2),
+)
+const brokerReturnActualDebit = computed(() =>
+  +(brokerReturnTradeTotal.value + brokerReturnHandFee.value).toFixed(2),
+)
 
 /** 买入：成交总额（不含手续费） */
 const buyTradeTotal = computed(() => {
@@ -1084,9 +1330,9 @@ async function callQueryAndUpdateStockPrice(options = {}) {
       applyBackendStockTick(s, data.gameTime)
     }
 
-    if (data.eventOccur && data.eventInfo) {
+    if (data.eventOccur) {
       pauseGameForRandomEvent()
-      openRandomEventDialog(data.eventInfo)
+      openRandomEventDialog(data)
       if (currentBView.value === 'newsLog') {
         void fetchUserRecentEvents()
       }
@@ -1147,25 +1393,22 @@ function pauseGameForRandomEvent() {
   stopLunchResumeTimer()
 }
 
-function buildEventDialogBody(info) {
-  const name = info.stockName || info.stockCode || '—'
-  const code = info.stockCode || '—'
-  const rate = Number(info.changeRate)
-  let impactLine = ''
-  if (!Number.isNaN(rate) && rate !== 0) {
-    const absPct = Math.abs(rate * 100).toFixed(2)
-    const dir = rate > 0 ? '上涨' : '下跌'
-    impactLine = `受本次事件影响：【${name}(${code})】股价${dir}${absPct}%`
-  } else {
-    impactLine = `受本次事件影响：【${name}(${code})】`
+function buildEventDialogBody(tick) {
+  const code = tick.affectedStockCode || '—'
+  const rate = Number(tick.changeRate)
+  let impactLine = `受本次事件影响【${code}】股价变动`
+  if (!Number.isNaN(rate)) {
+    const pct = (rate * 100).toFixed(2)
+    const sign = rate > 0 ? '+' : ''
+    impactLine = `受本次事件影响【${code}】股价变动${sign}${pct}%`
   }
-  const desc = info.eventContent || info.eventMsg || ''
+  const desc = tick.eventContent || ''
   return desc ? `${desc}\n\n${impactLine}` : impactLine
 }
 
-function openRandomEventDialog(eventInfo) {
-  eventDialogTitle.value = eventInfo.eventTitle || '重大突发新闻'
-  eventDialogBody.value = buildEventDialogBody(eventInfo)
+function openRandomEventDialog(tick) {
+  eventDialogTitle.value = tick.eventTitle || '重大突发新闻'
+  eventDialogBody.value = buildEventDialogBody(tick)
   eventDialogVisible.value = true
 }
 
@@ -1204,6 +1447,20 @@ function changeClass(val) {
   if (val > 0) return 'up'
   if (val < 0) return 'down'
   return 'flat'
+}
+
+function fundDirectionLabel(direction) {
+  const d = Number(direction)
+  if (d === 1) return '流入'
+  if (d === -1) return '流出'
+  return '无变动'
+}
+
+function fundDirectionClass(direction) {
+  const d = Number(direction)
+  if (d === 1) return 'fund-dir-in'
+  if (d === -1) return 'fund-dir-out'
+  return 'fund-dir-none'
 }
 
 function formatEventChangeRate(rate) {
@@ -1258,6 +1515,14 @@ function onHoldRowClick(row) {
   })
 }
 
+function openStockDetailByCode(code) {
+  const trimmed = String(code ?? '').trim()
+  if (!trimmed) return
+  const catalog = STOCK_CATALOG.find((s) => s.code === trimmed)
+  const name = stockPrices.value[trimmed]?.name || catalog?.name || trimmed
+  openStockDetail({ code: trimmed, name })
+}
+
 function openHoldListView() {
   if (currentSubPage.value !== 'stock') {
     currentSubPage.value = 'stock'
@@ -1267,8 +1532,12 @@ function openHoldListView() {
   closeTradeModal()
 }
 
+/** 从后端拉取用户最近随机事件（Redis 优先，否则 MySQL stock_event） */
 async function fetchUserRecentEvents() {
-  if (!userId.value) return
+  if (!userId.value) {
+    newsLogList.value = []
+    return
+  }
   newsLogLoading.value = true
   try {
     const res = await fetch(`${API_BASE}/api/event/getUserRecentEvent?userId=${userId.value}`)
@@ -1286,6 +1555,189 @@ async function fetchUserRecentEvents() {
   }
 }
 
+async function fetchCanBorrowCount(stockCode) {
+  if (!stockCode) {
+    brokerCanBorrow.value = null
+    return
+  }
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/broker/getCanBorrow?stockCode=${encodeURIComponent(stockCode)}`,
+    )
+    const body = await res.json()
+    brokerCanBorrow.value = body.code === 200 ? Number(body.data) : null
+  } catch {
+    brokerCanBorrow.value = null
+  }
+}
+
+function onBrokerStockChange() {
+  brokerFormError.value = ''
+  void fetchCanBorrowCount(brokerBorrowStockCode.value)
+}
+
+async function fetchUserShortInfo() {
+  if (!userId.value) {
+    shortInfoList.value = []
+    return
+  }
+  shortInfoLoading.value = true
+  try {
+    const res = await fetch(`${API_BASE}/api/broker/getUserShortInfo?userId=${userId.value}`)
+    const body = await res.json()
+    if (body.code !== 200 || !Array.isArray(body.data)) {
+      shortInfoList.value = []
+      return
+    }
+    shortInfoList.value = body.data
+  } catch (e) {
+    console.error('加载做空持仓失败', e)
+    shortInfoList.value = []
+  } finally {
+    shortInfoLoading.value = false
+  }
+}
+
+async function refreshBrokerPage() {
+  await Promise.all([
+    fetchUserShortInfo(),
+    fetchCanBorrowCount(brokerBorrowStockCode.value),
+  ])
+}
+
+function openBrokerView() {
+  if (currentSubPage.value !== 'stock') {
+    currentSubPage.value = 'stock'
+  }
+  currentBView.value = 'broker'
+  currentStock.value = null
+  closeTradeModal()
+  closeBrokerModals()
+  void refreshBrokerPage()
+}
+
+function parsePositiveQty(raw) {
+  const s = String(raw ?? '').trim()
+  if (!POSITIVE_INT_REG.test(s)) return null
+  return Number(s)
+}
+
+async function submitBorrowStock() {
+  brokerFormError.value = ''
+  const qty = parsePositiveQty(brokerBorrowQtyInput.value)
+  if (!brokerBorrowStockCode.value) {
+    brokerFormError.value = '请选择股票'
+    return
+  }
+  if (qty === null) {
+    brokerFormError.value = '请输入正整数借券股数'
+    return
+  }
+  if (brokerCanBorrow.value !== null && qty > brokerCanBorrow.value) {
+    brokerFormError.value = '借券股数不能超过券商可借库存'
+    return
+  }
+  try {
+    const { data: body } = await axios.post(`${API_BASE}/api/broker/borrowStock`, {
+      userId: userId.value,
+      stockCode: brokerBorrowStockCode.value,
+      borrowCount: qty,
+    })
+    if (body.code !== 200) {
+      brokerFormError.value = body.msg || '借券失败'
+      return
+    }
+    brokerBorrowQtyInput.value = ''
+    ElMessage.success('借券成功')
+    await refreshBrokerPage()
+  } catch (err) {
+    brokerFormError.value = err?.response?.data?.msg || '借券请求失败'
+  }
+}
+
+function openBrokerShortSellModal(row) {
+  brokerReturnModal.value = null
+  brokerShortSellModal.value = row
+  brokerModalQtyInput.value = ''
+  brokerModalError.value = ''
+}
+
+function openBrokerReturnModal(row) {
+  brokerShortSellModal.value = null
+  brokerReturnModal.value = row
+  brokerModalQtyInput.value = ''
+  brokerModalError.value = ''
+}
+
+function closeBrokerModals() {
+  brokerShortSellModal.value = null
+  brokerReturnModal.value = null
+  brokerModalQtyInput.value = ''
+  brokerModalError.value = ''
+}
+
+async function confirmShortSell() {
+  if (!brokerShortSellModal.value) return
+  const qty = parsePositiveQty(brokerModalQtyInput.value)
+  if (qty === null) {
+    brokerModalError.value = '请输入正整数股数'
+    return
+  }
+  if (qty > brokerShortSellModal.value.notSoldCount) {
+    brokerModalError.value = '不能超过未卖出融券股数'
+    return
+  }
+  const code = brokerShortSellModal.value.stockCode
+  try {
+    const { data: body } = await axios.post(`${API_BASE}/api/broker/shortSell`, {
+      userId: userId.value,
+      stockCode: code,
+      sellCount: qty,
+    })
+    if (body.code !== 200) {
+      brokerModalError.value = body.msg || '融券卖出失败'
+      return
+    }
+    ElMessage.success('融券卖出成功')
+    closeBrokerModals()
+    await refreshBrokerPage()
+    await fetchMyAsset()
+  } catch (err) {
+    brokerModalError.value = err?.response?.data?.msg || '请求失败'
+  }
+}
+
+async function confirmReturnStock() {
+  if (!brokerReturnModal.value) return
+  const qty = parsePositiveQty(brokerModalQtyInput.value)
+  if (qty === null) {
+    brokerModalError.value = '请输入正整数股数'
+    return
+  }
+  if (qty > brokerReturnModal.value.shortSoldCount) {
+    brokerModalError.value = '不能超过已卖出融券股数'
+    return
+  }
+  const code = brokerReturnModal.value.stockCode
+  try {
+    const { data: body } = await axios.post(`${API_BASE}/api/broker/returnStock`, {
+      userId: userId.value,
+      stockCode: code,
+      returnCount: qty,
+    })
+    if (body.code !== 200) {
+      brokerModalError.value = body.msg || '归还平仓失败'
+      return
+    }
+    ElMessage.success('归还平仓成功')
+    closeBrokerModals()
+    await refreshBrokerPage()
+    await fetchMyAsset()
+  } catch (err) {
+    brokerModalError.value = err?.response?.data?.msg || '请求失败'
+  }
+}
+
 function openNewsLogView() {
   if (currentSubPage.value !== 'stock') {
     currentSubPage.value = 'stock'
@@ -1293,7 +1745,41 @@ function openNewsLogView() {
   currentBView.value = 'newsLog'
   currentStock.value = null
   closeTradeModal()
+  newsLogList.value = []
   void fetchUserRecentEvents()
+}
+
+async function fetchOperateLogs() {
+  if (!userId.value) {
+    operateLogList.value = []
+    return
+  }
+  operateLogLoading.value = true
+  try {
+    const res = await fetch(`${API_BASE}/api/log/getOperateLog?userId=${userId.value}`)
+    const body = await res.json()
+    if (body.code !== 200 || !Array.isArray(body.data)) {
+      operateLogList.value = []
+      return
+    }
+    operateLogList.value = body.data
+  } catch (e) {
+    console.error('加载操作日志失败', e)
+    operateLogList.value = []
+  } finally {
+    operateLogLoading.value = false
+  }
+}
+
+function openOperateLogView() {
+  if (currentSubPage.value !== 'stock') {
+    currentSubPage.value = 'stock'
+  }
+  currentBView.value = 'operateLog'
+  currentStock.value = null
+  closeTradeModal()
+  operateLogList.value = []
+  void fetchOperateLogs()
 }
 
 function backToStockList() {
@@ -1519,12 +2005,6 @@ async function bootstrapGameSession() {
 onMounted(() => {
   loadUserInfo()
   username.value = localStorage.getItem('username') || username.value
-
-  const probRaw = sessionStorage.getItem('gameProbability')
-  if (probRaw !== null && probRaw !== '') {
-    const n = Number(probRaw)
-    eventProbability.value = Number.isNaN(n) ? null : n
-  }
 
   updateTime()
   timeTimer = setInterval(updateTime, 1000)
@@ -1805,6 +2285,20 @@ onUnmounted(() => {
 
 .down {
   color: #22c55e;
+}
+
+.fund-dir-in {
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.fund-dir-out {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.fund-dir-none {
+  color: #94a3b8;
 }
 
 .flat {
@@ -2148,6 +2642,70 @@ onUnmounted(() => {
   flex: 1;
 }
 
+.broker-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.broker-section:first-of-type {
+  border-top: none;
+  margin-top: 8px;
+  padding-top: 0;
+}
+
+.broker-subtitle {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.broker-borrow-row {
+  margin-bottom: 10px;
+}
+
+.broker-select {
+  width: 100%;
+  max-width: 360px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.broker-action-btn {
+  margin-top: 8px;
+}
+
+.btn-link {
+  margin-right: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-link:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.btn-link-warn {
+  color: #dc2626;
+}
+
+.news-log-panel {
+  min-height: 120px;
+}
+
+.news-log-loading {
+  color: #64748b;
+}
+
 .hold-empty {
   margin: 48px 0;
   text-align: center;
@@ -2178,6 +2736,19 @@ onUnmounted(() => {
 
 .hold-el-table :deep(.el-table__row:hover) {
   background: #f1f5f9 !important;
+}
+
+.broker-short-table :deep(.el-table__row) {
+  cursor: default;
+}
+
+.broker-short-table :deep(.el-table__row:hover) {
+  background: inherit !important;
+}
+
+.stock-code-link {
+  font-weight: 600;
+  padding: 0;
 }
 
 .stock-table {

@@ -55,6 +55,21 @@ public class UserMoneyServiceImpl implements UserMoneyService {
         gameSettingRedisUtil.updateMoney(userId, normalized);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateAvailableMoneyAllowNegative(Long userId, BigDecimal money) {
+        requireUser(userId);
+        if (money == null) {
+            throw new BusinessException("可用金钱不能为空");
+        }
+        BigDecimal normalized = money.setScale(2, RoundingMode.HALF_UP);
+        int rows = userInfoMapper.updateMoney(userId, normalized);
+        if (rows == 0) {
+            throw new BusinessException("更新用户金钱失败");
+        }
+        gameSettingRedisUtil.updateMoney(userId, normalized);
+    }
+
     private void requireUser(Long userId) {
         if (userId == null) {
             throw new BusinessException("userId 不能为空");

@@ -7,6 +7,7 @@ import com.stocksim.mapper.UserMapper;
 import com.stocksim.mapper.UserStockHoldMapper;
 import com.stocksim.service.BuyStockService;
 import com.stocksim.service.UserMoneyService;
+import com.stocksim.service.UserOperateLogService;
 import com.stocksim.util.UserStockHoldRedisUtil;
 import com.stocksim.util.UserStockPriceRedisUtil;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class BuyStockServiceImpl implements BuyStockService {
     private final UserMoneyService userMoneyService;
     private final UserStockPriceRedisUtil userStockPriceRedisUtil;
     private final UserStockHoldRedisUtil userStockHoldRedisUtil;
+    private final UserOperateLogService userOperateLogService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -111,5 +113,8 @@ public class BuyStockServiceImpl implements BuyStockService {
         // 7. 同步 Redis 持仓：{userId}hold 总股数；{userId}holdmoney 本次成交价
         userStockHoldRedisUtil.saveHoldCount(userId, stockCode, totalHoldCount);
         userStockHoldRedisUtil.saveHoldMoneyPrice(userId, stockCode, currentPrice);
+
+        userOperateLogService.recordBuyStock(
+                userId, stockCode, buyCount, tradeTotal, handFee, actualDebit, newMoney);
     }
 }

@@ -19,7 +19,6 @@ import com.stocksim.util.GameSettingRedisUtil;
 import com.stocksim.util.StockPriceCalcUtil;
 import com.stocksim.util.UserStockPriceRedisUtil;
 import com.stocksim.vo.StockBasicVO;
-import com.stocksim.vo.StockEventInfoVO;
 import com.stocksim.vo.StockHistoryVO;
 import com.stocksim.vo.StockPriceItemVO;
 import com.stocksim.vo.StockPriceTickVO;
@@ -114,7 +113,7 @@ public class StockServiceImpl implements StockService {
 
         if (!currentTime.isBefore(MARKET_CLOSE)) {
             return buildTickResponse(
-                    gameDate, formatTime(MARKET_CLOSE), dbStocks, redisPrices, true, false, null, null);
+                    gameDate, formatTime(MARKET_CLOSE), dbStocks, redisPrices, true, null);
         }
 
         // ① 全部股票先执行日常 ±3% 波动
@@ -134,15 +133,7 @@ public class StockServiceImpl implements StockService {
         String newTimeStr = formatTime(newTime);
 
         // ② 8% 概率触发随机事件，叠加到单只股票
-        boolean eventOccur = false;
-        String eventMsg = null;
-        StockEventInfoVO eventInfo = null;
         EventTriggerResult triggerResult = tryTriggerRandomEvent(userId, gameDate, newTimeStr, dbStocks, updated);
-        if (triggerResult != null) {
-            eventOccur = true;
-            eventMsg = triggerResult.eventMsg();
-            eventInfo = triggerResult.eventInfo();
-        }
 
         if (isTradingEnd) {
             persistClosePricesToDb(userId, dbStocks, updated);
@@ -151,10 +142,15 @@ public class StockServiceImpl implements StockService {
         syncGameTime(userId, newTimeStr);
 
         return buildTickResponse(
-                gameDate, newTimeStr, dbStocks, toStringMap(updated), isTradingEnd, eventOccur, eventMsg, eventInfo);
+                gameDate, newTimeStr, dbStocks, toStringMap(updated), isTradingEnd, triggerResult);
     }
 
-    private record EventTriggerResult(String eventMsg, StockEventInfoVO eventInfo) {
+    private record EventTriggerResult(
+            String eventTitle,
+            String eventContent,
+            String affectedStockCode,
+            BigDecimal changeRate
+    ) {
     }
 
     /**
@@ -197,20 +193,12 @@ public class StockServiceImpl implements StockService {
         event.setCreateTime(LocalDateTime.now());
         stockEventService.saveEvent(event);
 
-        StockEventInfoVO info = new StockEventInfoVO();
-        info.setEventTitle(template.getTitle());
-        info.setEventContent(content);
-        info.setStockCode(stockCode);
-        info.setStockName(target.getStockName());
-        info.setChangeRate(changeRate);
-
-        BigDecimal pct = changeRate.multiply(new BigDecimal("100"))
-                .setScale(2, RoundingMode.HALF_UP);
-        String sign = pct.compareTo(BigDecimal.ZERO) > 0 ? "+" : "";
-        String tag = template.isBullish() ? "利好" : "利空";
-        String msg = String.format("【%s】%s %s：%s，股价变动 %s%s%%",
-                tag, stockCode, target.getStockName(), template.getTitle(), sign, pct.toPlainString());
-        return new EventTriggerResult(msg, info);
+        return new EventTriggerResult(
+                template.getTitle(),
+                content,
+                stockCode,
+                changeRate
+        );
     }
 
     private void validateTickRequest(QueryAndUpdateStockPriceDTO dto) {
@@ -294,9 +282,7 @@ public class StockServiceImpl implements StockService {
                                                List<UserStockPrice> dbStocks,
                                                Map<String, String> priceMap,
                                                boolean isTradingEnd,
-                                               boolean eventOccur,
-                                               String eventMsg,
-                                               StockEventInfoVO eventInfo) {
+                                               EventTriggerResult event) {
         List<StockPriceItemVO> items = new ArrayList<>();
         for (UserStockPrice stock : dbStocks) {
             StockPriceItemVO item = new StockPriceItemVO();
@@ -310,9 +296,15 @@ public class StockServiceImpl implements StockService {
         vo.setGameTime(gameTime);
         vo.setIsTradingEnd(isTradingEnd);
         vo.setStocks(items);
-        vo.setEventOccur(eventOccur);
-        vo.setEventMsg(eventMsg);
-        vo.setEventInfo(eventInfo);
+        if (event != null) {
+            vo.setEventOccur(true);
+            vo.setEventTitle(event.eventTitle());
+            vo.setEventContent(event.eventContent());
+            vo.setAffectedStockCode(event.affectedStockCode());
+            vo.setChangeRate(event.changeRate());
+        } else {
+            vo.setEventOccur(false);
+        }
         return vo;
     }
 }

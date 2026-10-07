@@ -7,6 +7,7 @@ import com.stocksim.mapper.UserMapper;
 import com.stocksim.mapper.UserStockHoldMapper;
 import com.stocksim.service.SellStockService;
 import com.stocksim.service.UserMoneyService;
+import com.stocksim.service.UserOperateLogService;
 import com.stocksim.util.UserStockHoldRedisUtil;
 import com.stocksim.util.UserStockPriceRedisUtil;
 import com.stocksim.vo.SellStockVO;
@@ -29,6 +30,7 @@ public class SellStockServiceImpl implements SellStockService {
     private final UserMoneyService userMoneyService;
     private final UserStockPriceRedisUtil userStockPriceRedisUtil;
     private final UserStockHoldRedisUtil userStockHoldRedisUtil;
+    private final UserOperateLogService userOperateLogService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -120,6 +122,9 @@ public class SellStockServiceImpl implements SellStockService {
         } else {
             userStockHoldRedisUtil.saveHoldCount(userId, stockCode, newHoldCount);
         }
+
+        userOperateLogService.recordSellStock(
+                userId, stockCode, sellCount, tradeAmount, handFee, netReceived, newMoney);
 
         return new SellStockVO(sellCount, tradeAmount, handFee, netReceived);
     }

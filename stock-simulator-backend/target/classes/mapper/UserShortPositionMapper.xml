@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.UserShortPositionMapper">
+
+    <resultMap id="UserShortPositionMap" type="com.stocksim.entity.UserShortPosition">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="stock_code" property="stockCode"/>
+        <result column="short_count" property="shortCount"/>
+        <result column="short_sold_count" property="shortSoldCount"/>
+        <result column="not_sold_count" property="notSoldCount"/>
+        <result column="borrow_price" property="borrowPrice"/>
+        <result column="borrow_base_total" property="borrowBaseTotal"/>
+        <result column="create_game_date" property="createGameDate"/>
+        <result column="create_game_time" property="createGameTime"/>
+    </resultMap>
+
+    <select id="selectByUserIdAndStockCode" resultMap="UserShortPositionMap">
+        SELECT id, user_id, stock_code, short_count, short_sold_count, not_sold_count,
+               borrow_price, borrow_base_total, create_game_date, create_game_time
+        FROM user_short_position
+        WHERE user_id = #{userId} AND stock_code = #{stockCode}
+        LIMIT 1
+    </select>
+
+    <select id="selectByUserId" resultMap="UserShortPositionMap">
+        SELECT id, user_id, stock_code, short_count, short_sold_count, not_sold_count,
+               borrow_price, borrow_base_total, create_game_date, create_game_time
+        FROM user_short_position
+        WHERE user_id = #{userId}
+        ORDER BY stock_code
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_short_position (
+            user_id, stock_code, short_count, short_sold_count, not_sold_count,
+            borrow_price, borrow_base_total, create_game_date, create_game_time
+        ) VALUES (
+            #{userId}, #{stockCode}, #{shortCount}, #{shortSoldCount}, #{notSoldCount},
+            #{borrowPrice}, #{borrowBaseTotal}, #{createGameDate}, #{createGameTime}
+        )
+    </insert>
+
+    <update id="updatePosition">
+        UPDATE user_short_position
+        SET short_count = #{shortCount},
+            short_sold_count = #{shortSoldCount},
+            not_sold_count = #{notSoldCount},
+            borrow_price = #{borrowPrice},
+            borrow_base_total = #{borrowBaseTotal}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteByUserIdAndStockCode">
+        DELETE FROM user_short_position
+        WHERE user_id = #{userId} AND stock_code = #{stockCode}
+    </delete>
+</mapper>

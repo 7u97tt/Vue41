@@ -8,6 +8,7 @@ import com.stocksim.entity.UserStockPrice;
 import com.stocksim.mapper.UserInfoMapper;
 import com.stocksim.mapper.UserMapper;
 import com.stocksim.mapper.UserStockPriceMapper;
+import com.stocksim.service.BrokerService;
 import com.stocksim.service.GameService;
 import com.stocksim.util.GameSettingRedisUtil;
 import com.stocksim.util.StockPriceCalcUtil;
@@ -40,6 +41,7 @@ public class GameServiceImpl implements GameService {
     private final UserStockPriceMapper userStockPriceMapper;
     private final GameSettingRedisUtil gameSettingRedisUtil;
     private final UserStockPriceRedisUtil userStockPriceRedisUtil;
+    private final BrokerService brokerService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -65,6 +67,9 @@ public class GameServiceImpl implements GameService {
             nextDate = nextDate.plusDays(1);
         }
         String newDateStr = nextDate.format(DATE_FMT);
+
+        // 上一游戏交易日结束后，对未平仓融券扣当日借券手续费（5%×借券基准总额）
+        brokerService.chargeDailyBorrowFees(dto.getUserId());
 
         userInfoMapper.updateGameDate(dto.getUserId(), newDateStr);
         userInfoMapper.updateGameTime(dto.getUserId(), OPEN_TIME);
