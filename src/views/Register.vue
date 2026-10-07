@@ -4,12 +4,12 @@
       <h1>注册</h1>
 
       <form @submit.prevent="handleRegister">
-        <label for="account">账号</label>
+        <label for="username">账号</label>
         <input
-          id="account"
-          v-model="account"
+          id="username"
+          v-model="username"
           type="text"
-          placeholder="请输入账号"
+          placeholder="4-10位字母或数字"
           autocomplete="username"
         />
 
@@ -123,7 +123,11 @@
           </button>
         </div>
 
-        <button type="submit">注册</button>
+        <p v-if="message" class="message" :class="messageType">{{ message }}</p>
+
+        <button type="submit" :disabled="submitting">
+          {{ submitting ? '注册中…' : '注册' }}
+        </button>
       </form>
 
       <p class="footer">
@@ -135,37 +139,101 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import axios from 'axios'
+import { onMounted, ref } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 
-const account = ref('')
+// #region agent log
+onMounted(() => {
+  fetch('http://127.0.0.1:7491/ingest/47454bd9-cd64-4d3c-a84e-ffc937c920bc', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '251970' },
+    body: JSON.stringify({
+      sessionId: '251970',
+      hypothesisId: 'H-C',
+      location: 'Register.vue:onMounted',
+      message: 'register-module-loaded',
+      data: { axiosPostFn: typeof axios.post === 'function' },
+      timestamp: Date.now(),
+      runId: 'pre-fix',
+    }),
+  }).catch(() => {})
+})
+// #endregion
+
+const API_BASE = 'http://localhost:8080'
+
+const router = useRouter()
+
+const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+const message = ref('')
+const messageType = ref('error')
+const submitting = ref(false)
 
-const strongPasswordReg = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,20}$/
+const usernameReg = /^[A-Za-z0-9]{4,10}$/
 
-const handleRegister = () => {
-  if (!account.value.trim()) {
-    alert('账号不能为空')
-    return
+function setMessage(text, type = 'error') {
+  message.value = text
+  messageType.value = type
+}
+
+function validateForm() {
+  const name = username.value.trim()
+  if (!name) {
+    setMessage('用户名不能为空')
+    return false
   }
-
-  if (!strongPasswordReg.test(password.value)) {
-    alert('密码需同时满足：至少1个大写英文字母、至少1个小写英文字母、至少1个数字，长度8-20位')
-    return
+  if (!usernameReg.test(name)) {
+    setMessage('用户名为 4-10 位字母或数字，不能包含特殊字符')
+    return false
   }
-
+  if (!password.value) {
+    setMessage('密码不能为空')
+    return false
+  }
+  if (!confirmPassword.value) {
+    setMessage('确认密码不能为空')
+    return false
+  }
   if (password.value !== confirmPassword.value) {
-    alert('两次输入密码不一致')
+    setMessage('两次输入的密码不一致')
+    return false
+  }
+  return true
+}
+
+async function handleRegister() {
+  message.value = ''
+  if (!validateForm()) {
     return
   }
 
-  console.log({
-    account: account.value.trim(),
-    password: password.value,
-  })
+  submitting.value = true
+  try {
+    const { data: body } = await axios.post(`${API_BASE}/api/user/register`, {
+      username: username.value.trim(),
+      password: password.value,
+      confirmPassword: confirmPassword.value,
+    })
+
+    if (body.code !== 200) {
+      setMessage(body.msg || '注册失败')
+      return
+    }
+
+    setMessage(body.msg || '注册成功', 'success')
+    setTimeout(() => {
+      router.push('/login')
+    }, 800)
+  } catch {
+    setMessage('无法连接后端，请确认 Spring Boot 已启动')
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -251,6 +319,21 @@ input:focus {
   border-color: #42b883;
 }
 
+.message {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.message.error {
+  color: #dc2626;
+}
+
+.message.success {
+  color: #16a34a;
+}
+
 button[type='submit'] {
   margin-top: 8px;
   width: 100%;
@@ -263,8 +346,13 @@ button[type='submit'] {
   cursor: pointer;
 }
 
-button[type='submit']:hover {
+button[type='submit']:hover:not(:disabled) {
   background: #33a06f;
+}
+
+button[type='submit']:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .footer {

@@ -4,10 +4,18 @@
       <div class="top-left">
         <span class="label">当前时间</span>
         <span class="time-value">{{ currentTime }}</span>
+        <span class="label game-time-label">游戏日期</span>
+        <span class="time-value">{{ gameDate }}</span>
         <span class="label game-time-label">游戏时间</span>
         <span class="time-value">{{ gameTime }}</span>
+        <span v-if="isPaused" class="paused-hint">游戏已暂停</span>
+        <span v-else-if="lunchBreak" class="lunch-hint">午盘休市，13:00开盘</span>
+        <span v-else-if="marketClosed" class="closed-hint">已收盘</span>
       </div>
-      <div class="top-center">
+      <div class="top-center btn-group">
+        <button type="button" class="btn-secondary" @click="togglePauseGame">
+          {{ isPaused ? '继续游戏' : '暂停游戏' }}
+        </button>
         <button type="button" class="btn-secondary" @click="nextTradingDay">
           下一个交易日
         </button>
@@ -25,25 +33,46 @@
           <span class="stat-value">¥ {{ formatMoney(userMoney) }}</span>
         </div>
         <div class="stat-item">
+          <span class="stat-label">持仓市值</span>
+          <span class="stat-value">¥ {{ formatMoney(holdMarketValue) }}</span>
+        </div>
+        <div class="stat-item">
           <span class="stat-label">用户资产</span>
           <span class="stat-value">¥ {{ formatMoney(userAsset) }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">资产涨跌幅(%)</span>
-          <span class="stat-value" :class="changeClass(assetChange)">
-            {{ formatPercent(assetChange) }}
+          <span class="stat-label">总盈亏</span>
+          <span class="stat-value" :class="changeClass(totalProfit)">
+            ¥ {{ formatMoney(totalProfit) }}
           </span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">资产涨跌幅(%)</span>
+          <span class="stat-value" :class="changeClass(profitRate)">
+            {{ formatProfitRate(profitRate) }}
+          </span>
+        </div>
+        <div v-if="eventProbability !== null" class="stat-item">
+          <span class="stat-label">突发事件概率</span>
+          <span class="stat-value">{{ eventProbability }}%</span>
         </div>
       </div>
       <div class="asset-actions">
-        <button type="button" class="btn-primary" @click="goHoldings">我的持仓</button>
         <button
           type="button"
           class="btn-primary"
-          :class="{ active: showNews }"
-          @click="toggleNews"
+          :class="{ active: currentBView === 'holdList' && currentSubPage === 'stock' }"
+          @click="openHoldListView"
         >
-          新闻一览
+          我的持仓
+        </button>
+        <button
+          type="button"
+          class="btn-primary"
+          :class="{ active: currentBView === 'newsLog' && currentSubPage === 'stock' }"
+          @click="openNewsLogView"
+        >
+          新闻
         </button>
       </div>
       <div class="early-holdings">
@@ -94,6 +123,8 @@
         </div>
 
         <div v-else class="stock-panel">
+          <p v-if="isPaused" class="paused-banner">游戏已暂停</p>
+          <p v-else-if="lunchBreak" class="lunch-banner">午盘休市，13:00开盘</p>
           <div class="industry-col card">
             <button
               v-for="ind in industries"
@@ -108,27 +139,87 @@
           </div>
 
           <div class="b-area card">
-            <template v-if="showNews">
-              <h2 class="panel-title">历史新闻</h2>
-              <ul class="news-list">
-                <li v-for="(news, idx) in newsList" :key="idx" class="news-item">
-                  <h3 class="news-title">{{ news.title }}</h3>
-                  <time class="news-time">{{ news.time }}</time>
-                  <p class="news-summary">{{ news.summary }}</p>
-                </li>
-              </ul>
+            <template v-if="currentBView === 'newsLog'">
+              <button type="button" class="back-btn" @click="backToStockList">← 返回</button>
+              <h2 class="panel-title">突发事件新闻</h2>
+              <p v-if="newsLogLoading" class="hold-empty">加载中…</p>
+              <p v-else-if="!newsLogList.length" class="hold-empty">暂无突发事件新闻</p>
+              <div v-else class="hold-table-wrap">
+                <ElTable :data="newsLogList" stripe class="hold-el-table">
+                  <ElTableColumn prop="gameDate" label="游戏日期" min-width="110" />
+                  <ElTableColumn prop="gameTime" label="游戏时间" min-width="90" />
+                  <ElTableColumn prop="stockCode" label="股票代码" min-width="100" />
+                  <ElTableColumn prop="eventTitle" label="事件标题" min-width="140" />
+                  <ElTableColumn label="涨跌幅" min-width="100" align="right">
+                    <template #default="{ row }">
+                      <span :class="changeClass(Number(row.changeRate) * 100)">
+                        {{ formatEventChangeRate(row.changeRate) }}
+                      </span>
+                    </template>
+                  </ElTableColumn>
+                </ElTable>
+              </div>
             </template>
 
-            <template v-else-if="currentStock">
+            <template v-else-if="currentBView === 'holdList'">
+              <button type="button" class="back-btn" @click="backToStockList">← 返回</button>
+              <h2 class="panel-title">我的持仓</h2>
+              <p v-if="!holdTableData.length" class="hold-empty">暂无持仓，请前往买入股票</p>
+              <div v-else class="hold-table-wrap">
+                <ElTable
+                  :data="holdTableData"
+                  stripe
+                  class="hold-el-table"
+                  @row-click="onHoldRowClick"
+                >
+                  <ElTableColumn prop="stockName" label="股票名称" min-width="100" />
+                  <ElTableColumn prop="stockCode" label="股票代码" min-width="90" />
+                  <ElTableColumn prop="holdCount" label="持股数量" min-width="88" align="right" />
+                  <ElTableColumn label="买入成本价" min-width="100" align="right">
+                    <template #default="{ row }">
+                      {{ formatMoney(row.buyCostPrice) }}
+                    </template>
+                  </ElTableColumn>
+                  <ElTableColumn label="当前实时股价" min-width="110" align="right">
+                    <template #default="{ row }">
+                      {{ formatMoney(row.currentPrice) }}
+                    </template>
+                  </ElTableColumn>
+                  <ElTableColumn label="持仓市值" min-width="100" align="right">
+                    <template #default="{ row }">
+                      {{ formatMoney(row.marketValue) }}
+                    </template>
+                  </ElTableColumn>
+                  <ElTableColumn label="盈亏金额" min-width="100" align="right">
+                    <template #default="{ row }">
+                      <span :class="changeClass(Number(row.profitAmount))">
+                        {{ formatSignedMoney(row.profitAmount) }}
+                      </span>
+                    </template>
+                  </ElTableColumn>
+                  <ElTableColumn label="盈亏百分比" min-width="100" align="right">
+                    <template #default="{ row }">
+                      <span :class="changeClass(Number(row.profitRate))">
+                        {{ formatPercent(Number(row.profitRate)) }}
+                      </span>
+                    </template>
+                  </ElTableColumn>
+                </ElTable>
+              </div>
+            </template>
+
+            <template v-else-if="currentBView === 'stockDetail' && currentStock">
               <button type="button" class="back-btn" @click="backToStockList">← 返回</button>
               <h2 class="panel-title detail-title">
                 {{ currentStock.name }}
                 <span class="detail-code">{{ currentStock.code }}</span>
-                <span v-if="marketClosed" class="market-closed-tag">已收盘</span>
+                <span v-if="lunchBreak" class="market-lunch-tag">午盘休市</span>
+                <span v-else-if="marketClosed" class="market-closed-tag">已收盘</span>
               </h2>
 
               <div class="chart-wrap">
                 <svg
+                  :key="'price-chart-' + chartRenderKey"
                   class="price-chart"
                   :viewBox="`0 0 ${chartSize.width} ${chartSize.height}`"
                   preserveAspectRatio="xMidYMid meet"
@@ -232,7 +323,7 @@
                 <button
                   type="button"
                   class="btn-buy"
-                  :disabled="marketClosed"
+                  :disabled="marketClosed || lunchBreak"
                   @click="openTradeModal('buy')"
                 >
                   买入
@@ -241,7 +332,7 @@
                   v-if="currentHolding && currentHolding.quantity > 0"
                   type="button"
                   class="btn-sell"
-                  :disabled="marketClosed"
+                  :disabled="marketClosed || lunchBreak"
                   @click="openTradeModal('sell')"
                 >
                   卖出
@@ -249,7 +340,7 @@
               </div>
             </template>
 
-            <template v-else>
+            <template v-else-if="currentBView === 'stockList'">
               <h2 class="panel-title">{{ currentIndustryLabel }}</h2>
               <div class="table-wrap">
                 <table class="stock-table">
@@ -303,16 +394,45 @@
           id="tradeQty"
           v-model="tradeQuantityInput"
           type="number"
+          min="1"
+          step="1"
           class="modal-input"
           :placeholder="tradeModal === 'buy' ? '请输入买入股数' : '请输入卖出股数'"
           @input="tradeError = ''"
+          @keyup.enter="confirmTrade"
         />
         <p v-if="tradeError" class="modal-error">{{ tradeError }}</p>
 
-        <p class="modal-hint">当前股价：¥ {{ detailLatestPrice.toFixed(2) }}</p>
-        <p class="modal-hint">
-          预计总金额：¥ {{ formatMoney(estimatedTradeAmount) }}
-        </p>
+        <template v-if="tradeModal === 'buy'">
+          <p class="modal-hint">当前股价：¥ {{ modalUnitPrice.toFixed(2) }}</p>
+          <p class="modal-hint">
+            买入股数：{{ buyQuantityParsed > 0 ? buyQuantityParsed : '—' }}
+          </p>
+          <p class="modal-hint">
+            成交总额：¥ {{ formatMoney(buyTradeTotal) }}
+          </p>
+          <p class="modal-hint">
+            手续费（0.3%）：¥ {{ formatMoney(buyHandFee) }}
+          </p>
+          <p class="modal-hint modal-hint-strong">
+            实际扣款：¥ {{ formatMoney(buyActualDebit) }}
+          </p>
+        </template>
+        <template v-else-if="tradeModal === 'sell'">
+          <p class="modal-hint">当前股价：¥ {{ modalUnitPrice.toFixed(2) }}</p>
+          <p class="modal-hint">
+            卖出股数：{{ buyQuantityParsed > 0 ? buyQuantityParsed : '—' }}
+          </p>
+          <p class="modal-hint">
+            卖出成交总额：¥ {{ formatMoney(sellTradeTotal) }}
+          </p>
+          <p class="modal-hint">
+            卖出手续费（0.3%）：¥ {{ formatMoney(sellHandFee) }}
+          </p>
+          <p class="modal-hint modal-hint-strong">
+            实际到手金额：¥ {{ formatMoney(sellNetReceived) }}
+          </p>
+        </template>
 
         <div class="modal-actions">
           <button type="button" class="btn-modal-cancel" @click="closeTradeModal">
@@ -327,51 +447,125 @@
             确认{{ tradeModal === 'buy' ? '买入' : '卖出' }}
           </button>
         </div>
+
+        <template v-if="tradeModal === 'buy'">
+          <button type="button" class="btn-leverage modal-leverage-btn" @click="toggleLeverageSlider">
+            我要加杠杆🤬
+          </button>
+          <div v-show="showLeverageSlider" class="leverage-panel">
+            <div class="leverage-slider-wrap">
+              <span class="leverage-label">杠杆倍数：{{ leverageValue }}</span>
+              <ElSlider v-model="leverageValue" :min="1" :max="100" />
+            </div>
+            <button type="button" class="btn-leverage-confirm" @click="confirmLeverage">
+              确定
+            </button>
+          </div>
+        </template>
       </div>
     </div>
+
+    <ElDialog
+      v-model="eventDialogVisible"
+      :title="eventDialogTitle"
+      width="520px"
+      align-center
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      class="event-shock-dialog"
+    >
+      <p class="event-dialog-body">{{ eventDialogBody }}</p>
+      <template #footer>
+        <ElButton type="primary" @click="closeEventDialog">确定</ElButton>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
+import {
+  ElSlider,
+  ElMessage,
+  ElTable,
+  ElTableColumn,
+  ElDialog,
+  ElButton,
+} from 'element-plus'
+import 'element-plus/es/components/slider/style/css'
+import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/table/style/css'
+import 'element-plus/es/components/table-column/style/css'
+import 'element-plus/es/components/dialog/style/css'
+import 'element-plus/es/components/button/style/css'
 
 const router = useRouter()
 
 const POSITIVE_INT_REG = /^[1-9]\d*$/
+const BUY_HAND_FEE_RATE = 0.003
 const POINT_COUNT = 50
-const INITIAL_GAME_TIME = '13:35'
+const INITIAL_GAME_TIME = '09:30'
+const INITIAL_GAME_DATE = '2020-01-02'
+const API_BASE = 'http://localhost:8080'
+
+/**
+ * 前后端约定（A股交易时段，时间跳跃由前端控制）：
+ * - 正常交易：09:30‑11:30，13:00‑15:00
+ * - 接口返回 gameTime === "11:30" 时进入午休：停止 2 秒轮询，下次请求传 gameTime="13:00"
+ * - 11:30~13:00 不重复传 11:30；由前端直传 13:00 跳过中午段，股价波动仍由后端接口执行
+ */
+const LUNCH_END_TIME = '13:00'
+const MORNING_CLOSE_TIME = '11:30'
 
 const currentTime = ref('')
-const gameTime = ref(INITIAL_GAME_TIME)
+const gameDate = ref('')
+const gameTime = ref('')
+const userId = ref(Number(localStorage.getItem('userId')) || 0)
 const marketClosed = ref(false)
+/** 午盘休市等待阶段（已收到 11:30，尚未完成 13:00 跳转请求） */
+const lunchBreak = ref(false)
+const isPaused = ref(false)
 const stockPrices = ref({})
+/** 折线图 5 分钟粒度股价点 { [stockCode]: { time, price }[] } */
+const stockChartData = ref({})
 const chartRevision = ref(0)
+/** 强制重建 SVG，避免切换交易日后残留上一日折线 */
+const chartRenderKey = ref(0)
 
-const userMoney = ref(128500.5)
-const userAsset = ref(256800.75)
-const assetChange = ref(2.35)
+const userMoney = ref(0)
+const holdMarketValue = ref(0)
+const userAsset = ref(0)
+const totalProfit = ref(0)
+const profitRate = ref(null)
 const currentSubPage = ref('stock')
 const currentIndustry = ref('daily')
-const showNews = ref(false)
+/** B 区视图：stockList | stockDetail | holdList | newsLog */
+const currentBView = ref('stockList')
+const holdTableData = ref([])
+const newsLogList = ref([])
+const newsLogLoading = ref(false)
+
+const eventDialogVisible = ref(false)
+const eventDialogTitle = ref('重大突发新闻')
+const eventDialogBody = ref('')
 const username = ref('游客')
 const currentStock = ref(null)
 const tradeModal = ref(null)
 const tradeQuantityInput = ref('')
 const tradeError = ref('')
+const showLeverageSlider = ref(false)
+const leverageValue = ref(1)
 
-const holdings = ref([
-  { code: '600101', name: '清新日化', quantity: 200, avgPrice: 17.8 },
-  { code: '600201', name: '城启地产', quantity: 500, avgPrice: 5.05 },
-  { code: '600701', name: '芯联电子', quantity: 80, avgPrice: 44.2 },
-  { code: '601201', name: '驰峰汽车', quantity: 120, avgPrice: 27.5 },
-])
-
-const initialTotalAsset = ref(0)
-const rngStore = new Map()
+const holdings = ref([])
+const stocksByIndustry = ref({})
+const eventProbability = ref(null)
 
 let timeTimer = null
 let gameTimer = null
+let lunchResumeTimer = null
 
 const chartSize = { width: 720, height: 250 }
 const chartPadding = { top: 20, right: 20, bottom: 44, left: 52 }
@@ -393,129 +587,56 @@ const industries = [
   { key: 'furniture', label: '家具用品' },
 ]
 
-const stockMap = {
-  daily: [
-    { name: '清新日化', code: '600101', basePrice: 18.42 },
-    { name: '蓝湾洗护', code: '600102', basePrice: 9.88 },
-    { name: '优护生活', code: '600103', basePrice: 24.15 },
-    { name: '净界股份', code: '600104', basePrice: 31.6 },
-  ],
-  realestate: [
-    { name: '城启地产', code: '600201', basePrice: 5.12 },
-    { name: '万城控股', code: '600202', basePrice: 8.76 },
-    { name: '新岸置业', code: '600203', basePrice: 12.33 },
-    { name: '景园开发', code: '600204', basePrice: 6.05 },
-    { name: '和信商管', code: '600205', basePrice: 15.8 },
-  ],
-  transport: [
-    { name: '远航物流', code: '600301', basePrice: 11.25 },
-    { name: '港通航运', code: '600302', basePrice: 7.44 },
-    { name: '陆联快运', code: '600303', basePrice: 19.6 },
-    { name: '铁运集团', code: '600304', basePrice: 4.98 },
-  ],
-  agri: [
-    { name: '绿野农牧', code: '600401', basePrice: 13.55 },
-    { name: '丰禾种业', code: '600402', basePrice: 22.1 },
-    { name: '渔丰水产', code: '600403', basePrice: 8.32 },
-    { name: '林源林业', code: '600404', basePrice: 6.77 },
-  ],
-  metallurgy: [
-    { name: '华钢股份', code: '600501', basePrice: 10.85 },
-    { name: '矿源集团', code: '600502', basePrice: 14.22 },
-    { name: '鑫铜金属', code: '600503', basePrice: 28.9 },
-    { name: '合金科技', code: '600504', basePrice: 16.03 },
-    { name: '铁矿能源', code: '600505', basePrice: 9.15 },
-  ],
-  petro: [
-    { name: '东海石化', code: '600601', basePrice: 21.4 },
-    { name: '炼化股份', code: '600602', basePrice: 17.88 },
-    { name: '油气管道', code: '600603', basePrice: 12.05 },
-    { name: '化工新材', code: '600604', basePrice: 33.2 },
-  ],
-  it: [
-    { name: '芯联电子', code: '600701', basePrice: 45.6 },
-    { name: '云智软件', code: '600702', basePrice: 38.15 },
-    { name: '光讯通信', code: '600703', basePrice: 52.8 },
-    { name: '数创科技', code: '600704', basePrice: 29.44 },
-    { name: '智联设备', code: '600705', basePrice: 18.9 },
-  ],
-  machinery: [
-    { name: '重工装备', code: '600801', basePrice: 14.75 },
-    { name: '精机制造', code: '600802', basePrice: 26.3 },
-    { name: '机电一体', code: '600803', basePrice: 11.08 },
-    { name: '传动机电', code: '600804', basePrice: 9.62 },
-  ],
-  food: [
-    { name: '味享食品', code: '600901', basePrice: 16.25 },
-    { name: '童趣玩具', code: '600902', basePrice: 8.9 },
-    { name: '鲜焙烘焙', code: '600903', basePrice: 12.44 },
-    { name: '乐玩创意', code: '600904', basePrice: 20.15 },
-    { name: '优选零食', code: '600905', basePrice: 7.33 },
-  ],
-  textile: [
-    { name: '锦绣纺织', code: '601001', basePrice: 6.85 },
-    { name: '尚衣股份', code: '601002', basePrice: 13.2 },
-    { name: '丝韵面料', code: '601003', basePrice: 9.05 },
-    { name: '潮牌服饰', code: '601004', basePrice: 18.66 },
-  ],
-  service: [
-    { name: '智询顾问', code: '601101', basePrice: 25.5 },
-    { name: '安维检测', code: '601102', basePrice: 14.08 },
-    { name: '律信服务', code: '601103', basePrice: 32.4 },
-    { name: '云账财税', code: '601104', basePrice: 19.75 },
-  ],
-  auto: [
-    { name: '驰峰汽车', code: '601201', basePrice: 28.6 },
-    { name: '新能动力', code: '601202', basePrice: 41.2 },
-    { name: '精零部件', code: '601203', basePrice: 15.88 },
-    { name: '智驾系统', code: '601204', basePrice: 55.3 },
-    { name: '商用客车', code: '601205', basePrice: 10.05 },
-  ],
-  office: [
-    { name: '文汇办公', code: '601301', basePrice: 11.35 },
-    { name: '学具股份', code: '601302', basePrice: 8.42 },
-    { name: '纸品文具', code: '601303', basePrice: 5.96 },
-    { name: '智慧教具', code: '601304', basePrice: 22.18 },
-  ],
-  furniture: [
-    { name: '木语家居', code: '601401', basePrice: 17.65 },
-    { name: '尚品家具', code: '601402', basePrice: 23.4 },
-    { name: '绿居定制', code: '601403', basePrice: 14.05 },
-    { name: '软体生活', code: '601404', basePrice: 19.88 },
-    { name: '整装空间', code: '601405', basePrice: 27.12 },
-  ],
+const STOCK_CATALOG = [
+  { name: '噢喵洗涤', code: '601001', industryKey: 'daily' },
+  { name: '象印纸业', code: '601002', industryKey: 'daily' },
+  { name: '哼哒地产', code: '602001', industryKey: 'realestate' },
+  { name: '星连航空', code: '603001', industryKey: 'transport' },
+  { name: '瞬风快递', code: '603002', industryKey: 'transport' },
+  { name: '木原养殖', code: '604001', industryKey: 'agri' },
+  { name: '光头林业', code: '604002', industryKey: 'agri' },
+  { name: '手钢钢铁', code: '605001', industryKey: 'metallurgy' },
+  { name: '善喜煤炭', code: '605002', industryKey: 'metallurgy' },
+  { name: '钟石化石油', code: '605003', industryKey: 'petro' },
+  { name: '钟石由石油', code: '605004', industryKey: 'petro' },
+  { name: '妙妙电子', code: '606001', industryKey: 'it' },
+  { name: '大米信息', code: '606002', industryKey: 'it' },
+  { name: '保利工业', code: '607001', industryKey: 'machinery' },
+  { name: '红漆机械', code: '607002', industryKey: 'machinery' },
+  { name: '汪汪食品', code: '608001', industryKey: 'food' },
+  { name: '基米玩具', code: '608002', industryKey: 'food' },
+  { name: '康帅傅饮品', code: '608003', industryKey: 'food' },
+  { name: '呦一裤服装', code: '609001', industryKey: 'textile' },
+  { name: '风柱纺织', code: '609002', industryKey: 'textile' },
+  { name: '杨光保险', code: '610001', industryKey: 'service' },
+  { name: '专业律所', code: '610002', industryKey: 'service' },
+  { name: '摩根银行', code: '610003', industryKey: 'service' },
+  { name: '妙妙汽车', code: '611001', industryKey: 'auto' },
+  { name: '大米汽车', code: '611002', industryKey: 'auto' },
+  { name: '晨咣文具', code: '612001', industryKey: 'office' },
+  { name: '德利文具', code: '612002', industryKey: 'office' },
+  { name: '怡家家具', code: '613001', industryKey: 'furniture' },
+  { name: '美白勺电器', code: '613002', industryKey: 'furniture' },
+  { name: '嗨耳兄弟电器', code: '613003', industryKey: 'furniture' },
+]
+
+function buildFallbackStockMap() {
+  const map = {}
+  for (const item of STOCK_CATALOG) {
+    if (!map[item.industryKey]) map[item.industryKey] = []
+    map[item.industryKey].push({ name: item.name, code: item.code })
+  }
+  return map
 }
 
-const newsList = ref([
-  {
-    title: '央行维持政策利率不变，市场流动性保持平稳',
-    time: '2026/10/05 09:30',
-    summary: '最新货币政策会议结果公布，短期利率区间未作调整，金融机构普遍预期后续仍将保持稳健偏宽松基调。',
-  },
-  {
-    title: '电子信息板块午后走强，半导体龙头领涨',
-    time: '2026/10/04 14:15',
-    summary: '受海外订单回暖预期影响，芯片设计与设备制造相关个股集体上扬，板块成交额较前一交易日明显放大。',
-  },
-  {
-    title: '房地产支持政策持续落地，多地优化购房信贷条件',
-    time: '2026/10/03 11:20',
-    summary: '部分城市下调首付比例并延长贷款年限，分析师认为政策有助于稳定市场预期，但分化行情仍将延续。',
-  },
-  {
-    title: '国际油价震荡回落，石油化工板块承压',
-    time: '2026/10/02 16:45',
-    summary: '原油期货价格小幅下跌，炼化企业成本端压力有所缓解，但下游需求恢复节奏仍偏缓慢。',
-  },
-  {
-    title: '新能源汽车销量数据公布，产业链个股分化加剧',
-    time: '2026/10/01 10:00',
-    summary: '9月乘用车零售数据出炉，头部品牌维持增长，二线厂商竞争加剧，零部件企业业绩预期出现明显差异。',
-  },
-])
+const fallbackStockMap = buildFallbackStockMap()
 
 const currentStocks = computed(() => {
-  return (stockMap[currentIndustry.value] || []).map((s) => ({
+  const list =
+    stocksByIndustry.value[currentIndustry.value] ||
+    fallbackStockMap[currentIndustry.value] ||
+    []
+  return list.map((s) => ({
     name: s.name,
     code: s.code,
     price: getLatestPrice(s.code),
@@ -536,7 +657,7 @@ const currentHolding = computed(() => {
 const detailPriceSeries = computed(() => {
   chartRevision.value
   if (!currentStock.value) return []
-  return stockPrices.value[currentStock.value.code]?.prices ?? []
+  return stockChartData.value[currentStock.value.code] ?? []
 })
 
 const detailLatestPrice = computed(() => {
@@ -562,12 +683,62 @@ const tickPriceDeltaPct = computed(() => {
   return +(((last - prev) / prev) * 100).toFixed(2)
 })
 
-const estimatedTradeAmount = computed(() => {
-  if (!currentStock.value || !POSITIVE_INT_REG.test(tradeQuantityInput.value.trim())) {
-    return 0
-  }
-  return detailLatestPrice.value * Number(tradeQuantityInput.value.trim())
+function tradeQtyInputRaw() {
+  return String(tradeQuantityInput.value ?? '').trim()
+}
+
+/** 详情页成交价：优先折线最新点，否则取行情缓存 */
+function resolveDetailPrice() {
+  const code = currentStock.value?.code
+  if (!code) return 0
+  if (detailLatestPrice.value > 0) return detailLatestPrice.value
+  const cached = getLatestPrice(code)
+  if (cached > 0) return cached
+  return Number(currentStock.value?.price) || 0
+}
+
+const buyQuantityParsed = computed(() => {
+  const raw = tradeQtyInputRaw()
+  if (!POSITIVE_INT_REG.test(raw)) return 0
+  return Number(raw)
 })
+
+const modalUnitPrice = computed(() => {
+  chartRevision.value
+  return resolveDetailPrice()
+})
+
+/** 买入：成交总额（不含手续费） */
+const buyTradeTotal = computed(() => {
+  if (!currentStock.value || !buyQuantityParsed.value) return 0
+  return resolveDetailPrice() * buyQuantityParsed.value
+})
+
+/** 买入：手续费 = 成交总额 × 0.3% */
+const buyHandFee = computed(() =>
+  +(buyTradeTotal.value * BUY_HAND_FEE_RATE).toFixed(2),
+)
+
+/** 买入：实际扣款 = 成交总额 + 手续费 */
+const buyActualDebit = computed(() =>
+  +(buyTradeTotal.value + buyHandFee.value).toFixed(2),
+)
+
+/** 卖出：成交总额 */
+const sellTradeTotal = computed(() => {
+  if (!currentStock.value || !buyQuantityParsed.value) return 0
+  return resolveDetailPrice() * buyQuantityParsed.value
+})
+
+/** 卖出：手续费 = 成交总额 × 0.3% */
+const sellHandFee = computed(() =>
+  +(sellTradeTotal.value * BUY_HAND_FEE_RATE).toFixed(2),
+)
+
+/** 卖出：实际到手 = 成交总额 - 手续费 */
+const sellNetReceived = computed(() =>
+  +(sellTradeTotal.value - sellHandFee.value).toFixed(2),
+)
 
 const earlyHoldingsDisplay = computed(() => {
   chartRevision.value
@@ -695,163 +866,17 @@ function timeToMinutes(time) {
   return h * 60 + m
 }
 
-function minutesToTime(mins) {
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return `${pad(h)}:${pad(m)}`
-}
-
-function hashCode(str) {
-  let hash = 0
-  for (let i = 0; i < str.length; i += 1) {
-    hash = (hash << 5) - hash + str.charCodeAt(i)
-    hash |= 0
-  }
-  return Math.abs(hash)
-}
-
-function createRng(seed) {
-  let state = seed % 233280 || 1
-  return () => {
-    state = (state * 9301 + 49297) % 233280
-    return state / 233280
-  }
-}
-
-function getRng(code) {
-  if (!rngStore.has(code)) {
-    rngStore.set(code, createRng(hashCode(code)))
-  }
-  return rngStore.get(code)
-}
-
-function fluctuate(price, pct, rng) {
-  const delta = (rng() * 2 - 1) * pct
-  return Math.max(0.01, +(price * (1 + delta)).toFixed(2))
-}
-
-function openGapPrice(closePrice, rng) {
-  const gap = (rng() * 2 - 1) * 0.01
-  return Math.max(0.01, +(closePrice * (1 + gap)).toFixed(2))
-}
-
-function stepBackSessionTime(time) {
-  const m = timeToMinutes(time)
-  if (m <= timeToMinutes('09:30')) {
-    return minutesToTime(m - 5)
-  }
-  if (m === timeToMinutes('13:00')) {
-    return '11:30'
-  }
-  return minutesToTime(m - 5)
-}
-
-function buildFullDayTimeSlots() {
-  const morning = []
-  for (let i = 0; i < 25; i += 1) {
-    morning.push(minutesToTime(timeToMinutes('09:30') + i * 5))
-  }
-  const afternoon = []
-  for (let i = 0; i < 25; i += 1) {
-    afternoon.push(minutesToTime(timeToMinutes('13:00') + i * 5))
-  }
-  return [...morning, ...afternoon]
-}
-
-function buildSessionTimesEndingAt(endTime, count) {
-  const times = [endTime]
-  let cur = endTime
-  while (times.length < count) {
-    cur = stepBackSessionTime(cur)
-    times.push(cur)
-  }
-  return times.reverse()
-}
-
-function isMorningTime(time) {
-  return timeToMinutes(time) <= timeToMinutes('11:30')
-}
-
-function isAfternoonTime(time) {
-  return timeToMinutes(time) >= timeToMinutes('13:00')
-}
-
-function generatePricesAlongTimes(times, startPrice, code) {
-  const rng = getRng(code)
-  const prices = []
-  let lastPrice = startPrice
-
-  for (let i = 0; i < times.length; i += 1) {
-    const t = times[i]
-    if (i === 0) {
-      prices.push({ time: t, price: lastPrice })
-      continue
-    }
-    const prevTime = times[i - 1]
-    const crossedLunch =
-      isMorningTime(prevTime) &&
-      isAfternoonTime(t) &&
-      timeToMinutes(prevTime) <= timeToMinutes('11:30')
-    if (crossedLunch) {
-      const morningClose =
-        [...prices].reverse().find((p) => p.time === '11:30')?.price ??
-        prices[prices.length - 1].price
-      lastPrice = openGapPrice(morningClose, rng)
-    } else {
-      lastPrice = fluctuate(lastPrice, 0.02, rng)
-    }
-    prices.push({ time: t, price: lastPrice })
-  }
-  return prices
-}
-
-function generateInitialPrices(basePrice, code) {
-  const daySlots = buildFullDayTimeSlots()
-  const endIdx = daySlots.indexOf(INITIAL_GAME_TIME)
-  const intradayTimes = endIdx >= 0 ? daySlots.slice(0, endIdx + 1) : daySlots
-  const intradayPrices = generatePricesAlongTimes(intradayTimes, basePrice, code)
-
-  if (intradayPrices.length >= POINT_COUNT) {
-    return intradayPrices.slice(intradayPrices.length - POINT_COUNT)
-  }
-
-  const need = POINT_COUNT - intradayPrices.length
-  const prefixTimes = buildSessionTimesEndingAt(intradayTimes[0], need + 1).slice(0, need)
-  const prefixPrices = generatePricesAlongTimes(
-    prefixTimes,
-    Math.max(0.01, basePrice * (0.95 + getRng(code)() * 0.05)),
-    `${code}_pre`,
-  )
-  return [...prefixPrices, ...intradayPrices].slice(-POINT_COUNT)
-}
-
-function initStockPrices() {
-  const next = {}
-  rngStore.clear()
-  for (const list of Object.values(stockMap)) {
-    for (const stock of list) {
-      next[stock.code] = {
-        name: stock.name,
-        prices: generateInitialPrices(stock.basePrice, stock.code),
-      }
-    }
-  }
-  stockPrices.value = next
-  gameTime.value = INITIAL_GAME_TIME
-  marketClosed.value = false
-}
-
 function getLatestPrice(code) {
-  const entry = stockPrices.value[code]
-  if (!entry?.prices?.length) return 0
-  return entry.prices[entry.prices.length - 1].price
+  const series = stockChartData.value[code]
+  if (!series?.length) return 0
+  return series[series.length - 1].price
 }
 
 function getChangePercent(code) {
-  const entry = stockPrices.value[code]
-  if (!entry?.prices || entry.prices.length < 2) return 0
-  const last = entry.prices[entry.prices.length - 1].price
-  const prev = entry.prices[entry.prices.length - 2].price
+  const series = stockChartData.value[code]
+  if (!series || series.length < 2) return 0
+  const last = series[series.length - 1].price
+  const prev = series[series.length - 2].price
   if (prev === 0) return 0
   return +(((last - prev) / prev) * 100).toFixed(2)
 }
@@ -871,71 +896,233 @@ function timeToChartX(time, left, amWidth, pmLeft, pmWidth) {
   return pmLeft + pmWidth * Math.min(1, Math.max(0, ratio))
 }
 
-function advanceGameTime() {
-  const t = gameTime.value
-  if (t === '14:55') {
-    gameTime.value = '15:00'
-    return
-  }
-  if (t === '11:25') {
-    gameTime.value = '13:00'
-    return
-  }
-  const m = timeToMinutes(t)
-  if (m < timeToMinutes('11:25')) {
-    gameTime.value = minutesToTime(m + 5)
-    return
-  }
-  if (m >= timeToMinutes('13:00') && m < timeToMinutes('14:55')) {
-    gameTime.value = minutesToTime(m + 5)
-  }
-}
-
-function appendPriceTickForStock(code, entry, newTime) {
-  const prices = entry.prices
-  const last = prices[prices.length - 1]
-  const rng = getRng(code)
-  let newPrice
-
-  if (newTime === '13:00' && timeToMinutes(last.time) <= timeToMinutes('11:30')) {
-    const morningClose =
-      [...prices].reverse().find((p) => p.time === '11:30')?.price ?? last.price
-    newPrice = openGapPrice(morningClose, rng)
+function applyBackendStockTick(stock, tickTime) {
+  const code = stock.stockCode
+  const price = Number(stock.lastTradePrice)
+  if (!stockPrices.value[code]) {
+    stockPrices.value[code] = { name: stock.stockName }
   } else {
-    newPrice = fluctuate(last.price, 0.02, rng)
+    stockPrices.value[code].name = stock.stockName
   }
 
-  const nextPrices = [...prices, { time: newTime, price: newPrice }]
+  const prevSeries = stockChartData.value[code] ?? []
+  const lastPoint = prevSeries[prevSeries.length - 1]
+  if (lastPoint && lastPoint.time === tickTime && lastPoint.price === price) {
+    return
+  }
+  const nextPrices = [...prevSeries, { time: tickTime, price }]
   if (nextPrices.length > POINT_COUNT) {
     nextPrices.shift()
   }
-  entry.prices = nextPrices
+  stockChartData.value = { ...stockChartData.value, [code]: nextPrices }
 }
 
-function runGameTick() {
-  if (marketClosed.value) return
-
-  advanceGameTime()
-  const newTime = gameTime.value
-
-  for (const [code, entry] of Object.entries(stockPrices.value)) {
-    appendPriceTickForStock(code, entry, newTime)
-  }
-
-  if (newTime === '15:00') {
-    marketClosed.value = true
-    stopGameTimer()
-  }
-
-  if (currentStock.value) {
-    currentStock.value = {
-      ...currentStock.value,
-      price: getLatestPrice(currentStock.value.code),
-    }
-  }
-
-  syncUserAssets()
+/** 新交易日：清空折线历史并重绘空图表（不影响持仓/资金） */
+function resetStockChartForNewTradingDay() {
+  stockChartData.value = {}
   chartRevision.value += 1
+  chartRenderKey.value += 1
+}
+
+function sessionKey() {
+  return `gameState_${userId.value}`
+}
+
+function loadSessionGameState() {
+  try {
+    const raw = sessionStorage.getItem(sessionKey())
+    if (raw) {
+      const saved = JSON.parse(raw)
+      if (saved.gameDate) gameDate.value = saved.gameDate
+      if (saved.gameTime) gameTime.value = saved.gameTime
+      if (typeof saved.marketClosed === 'boolean') {
+        marketClosed.value = saved.marketClosed
+      }
+      if (typeof saved.lunchBreak === 'boolean') {
+        lunchBreak.value = saved.lunchBreak
+      }
+      return
+    }
+  } catch {
+    /* ignore */
+  }
+  gameDate.value = INITIAL_GAME_DATE
+  gameTime.value = INITIAL_GAME_TIME
+  marketClosed.value = false
+  lunchBreak.value = false
+}
+
+function persistSessionGameState() {
+  sessionStorage.setItem(
+    sessionKey(),
+    JSON.stringify({
+      gameDate: gameDate.value,
+      gameTime: gameTime.value,
+      marketClosed: marketClosed.value,
+      lunchBreak: lunchBreak.value,
+    }),
+  )
+}
+
+function stopLunchResumeTimer() {
+  if (lunchResumeTimer) {
+    clearTimeout(lunchResumeTimer)
+    lunchResumeTimer = null
+  }
+}
+
+function scheduleLunchResumeCall() {
+  stopLunchResumeTimer()
+  if (isPaused.value) return
+  lunchResumeTimer = setTimeout(() => {
+    lunchResumeTimer = null
+    refreshMarketData({ requestGameTime: LUNCH_END_TIME })
+  }, 2000)
+}
+
+function resolveRequestGameTime(requestGameTime) {
+  if (requestGameTime) return requestGameTime
+  if (lunchBreak.value || gameTime.value === MORNING_CLOSE_TIME) {
+    return LUNCH_END_TIME
+  }
+  return gameTime.value
+}
+
+async function loadUserStockCatalog() {
+  if (!userId.value) return
+  try {
+    const res = await fetch(`${API_BASE}/api/stock/getUserAllStock?userId=${userId.value}`)
+    const body = await res.json()
+    if (body.code !== 200 || !Array.isArray(body.data)) return
+
+    const codeToIndustry = Object.fromEntries(
+      STOCK_CATALOG.map((item) => [item.code, item.industryKey]),
+    )
+    const map = {}
+    for (const row of body.data) {
+      const industryKey = codeToIndustry[row.stockCode] || 'daily'
+      if (!map[industryKey]) map[industryKey] = []
+      map[industryKey].push({ name: row.stockName, code: row.stockCode })
+    }
+    stocksByIndustry.value = map
+  } catch (e) {
+    console.error('加载用户股票列表失败', e)
+  }
+}
+
+async function fetchMyAsset() {
+  if (!userId.value) return
+  try {
+    const res = await fetch(`${API_BASE}/api/asset/getMyAsset?userId=${userId.value}`)
+    const body = await res.json()
+    if (body.code !== 200 || !body.data) return
+    const d = body.data
+    userMoney.value = Number(d.availableMoney)
+    holdMarketValue.value = Number(d.holdMarketValue ?? 0)
+    userAsset.value = Number(d.totalAsset)
+    totalProfit.value = Number(d.totalProfit ?? 0)
+    profitRate.value = d.profitRate === null || d.profitRate === undefined
+      ? null
+      : Number(d.profitRate)
+    const list = Array.isArray(d.holdList) ? d.holdList : []
+    holdTableData.value = list.map((row) => ({
+      stockName: row.stockName,
+      stockCode: row.stockCode,
+      holdCount: row.holdCount,
+      buyCostPrice: Number(row.buyCostPrice),
+      currentPrice: Number(row.currentPrice),
+      marketValue: Number(row.marketValue),
+      profitAmount: Number(row.profitAmount),
+      profitRate: Number(row.profitRate),
+    }))
+    holdings.value = holdTableData.value.map((h) => ({
+      code: h.stockCode,
+      name: h.stockName,
+      quantity: h.holdCount,
+      avgPrice: h.buyCostPrice,
+    }))
+  } catch (e) {
+    console.error('加载资产失败', e)
+  }
+}
+
+async function refreshMarketData(options = {}) {
+  if (!userId.value || isPaused.value) return
+  await Promise.all([
+    fetchMyAsset(),
+    callQueryAndUpdateStockPrice(options),
+  ])
+}
+
+async function callQueryAndUpdateStockPrice(options = {}) {
+  if (!userId.value || marketClosed.value) return
+
+  const effectiveGameTime = resolveRequestGameTime(options.requestGameTime)
+
+  try {
+    const res = await fetch(`${API_BASE}/api/stock/queryAndUpdateStockPrice`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId.value,
+        gameTime: effectiveGameTime,
+        gameDate: gameDate.value,
+      }),
+    })
+    const body = await res.json()
+    if (body.code !== 200) {
+      console.error(body.msg || '股价更新失败')
+      return
+    }
+
+    const data = body.data
+    gameTime.value = data.gameTime
+    gameDate.value = data.gameDate
+    marketClosed.value = !!data.isTradingEnd
+
+    for (const s of data.stocks || []) {
+      applyBackendStockTick(s, data.gameTime)
+    }
+
+    if (data.eventOccur && data.eventInfo) {
+      pauseGameForRandomEvent()
+      openRandomEventDialog(data.eventInfo)
+      if (currentBView.value === 'newsLog') {
+        void fetchUserRecentEvents()
+      }
+    }
+
+    if (currentStock.value) {
+      currentStock.value = {
+        ...currentStock.value,
+        price: getLatestPrice(currentStock.value.code),
+      }
+    }
+
+    chartRevision.value += 1
+    persistSessionGameState()
+
+    if (data.isTradingEnd) {
+      lunchBreak.value = false
+      stopGameTimer()
+      stopLunchResumeTimer()
+      return
+    }
+
+    if (data.gameTime === MORNING_CLOSE_TIME) {
+      lunchBreak.value = true
+      stopGameTimer()
+      scheduleLunchResumeCall()
+      return
+    }
+
+    lunchBreak.value = false
+    if (!gameTimer) {
+      startGameTimer()
+    }
+  } catch (e) {
+    console.error('无法连接后端股价接口', e)
+  }
 }
 
 function stopGameTimer() {
@@ -947,7 +1134,58 @@ function stopGameTimer() {
 
 function startGameTimer() {
   stopGameTimer()
-  gameTimer = setInterval(runGameTick, 2000)
+  if (marketClosed.value || lunchBreak.value || isPaused.value) return
+  gameTimer = setInterval(() => {
+    void refreshMarketData()
+  }, 2000)
+}
+
+/** 随机事件触发：自动暂停并停止轮询（需用户手动点「继续游戏」恢复） */
+function pauseGameForRandomEvent() {
+  isPaused.value = true
+  stopGameTimer()
+  stopLunchResumeTimer()
+}
+
+function buildEventDialogBody(info) {
+  const name = info.stockName || info.stockCode || '—'
+  const code = info.stockCode || '—'
+  const rate = Number(info.changeRate)
+  let impactLine = ''
+  if (!Number.isNaN(rate) && rate !== 0) {
+    const absPct = Math.abs(rate * 100).toFixed(2)
+    const dir = rate > 0 ? '上涨' : '下跌'
+    impactLine = `受本次事件影响：【${name}(${code})】股价${dir}${absPct}%`
+  } else {
+    impactLine = `受本次事件影响：【${name}(${code})】`
+  }
+  const desc = info.eventContent || info.eventMsg || ''
+  return desc ? `${desc}\n\n${impactLine}` : impactLine
+}
+
+function openRandomEventDialog(eventInfo) {
+  eventDialogTitle.value = eventInfo.eventTitle || '重大突发新闻'
+  eventDialogBody.value = buildEventDialogBody(eventInfo)
+  eventDialogVisible.value = true
+}
+
+function closeEventDialog() {
+  eventDialogVisible.value = false
+}
+
+function togglePauseGame() {
+  isPaused.value = !isPaused.value
+  if (isPaused.value) {
+    stopGameTimer()
+    stopLunchResumeTimer()
+    return
+  }
+  if (marketClosed.value) return
+  if (lunchBreak.value) {
+    scheduleLunchResumeCall()
+  } else {
+    startGameTimer()
+  }
 }
 
 function updateTime() {
@@ -968,10 +1206,34 @@ function changeClass(val) {
   return 'flat'
 }
 
+function formatEventChangeRate(rate) {
+  const n = Number(rate)
+  if (Number.isNaN(n)) return '0.00%'
+  const pct = n * 100
+  if (pct > 0) return `+${pct.toFixed(2)}%`
+  if (pct < 0) return `${pct.toFixed(2)}%`
+  return '0.00%'
+}
+
 function formatPercent(val) {
   if (val > 0) return `+${val.toFixed(2)}%`
   if (val < 0) return `${val.toFixed(2)}%`
   return '0.00%'
+}
+
+function formatProfitRate(val) {
+  if (val === null || val === undefined || Number.isNaN(val)) {
+    return '—'
+  }
+  return formatPercent(val)
+}
+
+function formatSignedMoney(val) {
+  const n = Number(val)
+  if (Number.isNaN(n)) return '0.00'
+  if (n > 0) return `+${formatMoney(n)}`
+  if (n < 0) return `-${formatMoney(Math.abs(n))}`
+  return formatMoney(0)
 }
 
 function formatDeltaAmount(val) {
@@ -980,21 +1242,8 @@ function formatDeltaAmount(val) {
   return '0.00'
 }
 
-function syncUserAssets() {
-  let holdingsValue = 0
-  for (const h of holdings.value) {
-    holdingsValue += h.quantity * getLatestPrice(h.code)
-  }
-  userAsset.value = +(userMoney.value + holdingsValue).toFixed(2)
-  if (initialTotalAsset.value > 0) {
-    assetChange.value = +(
-      ((userAsset.value - initialTotalAsset.value) / initialTotalAsset.value) *
-      100
-    ).toFixed(2)
-  }
-}
-
 function openStockDetail(stock) {
+  currentBView.value = 'stockDetail'
   currentStock.value = {
     code: stock.code,
     name: stock.name,
@@ -1002,13 +1251,67 @@ function openStockDetail(stock) {
   }
 }
 
-function backToStockList() {
+function onHoldRowClick(row) {
+  openStockDetail({
+    code: row.stockCode,
+    name: row.stockName,
+  })
+}
+
+function openHoldListView() {
+  if (currentSubPage.value !== 'stock') {
+    currentSubPage.value = 'stock'
+  }
+  currentBView.value = 'holdList'
   currentStock.value = null
   closeTradeModal()
 }
 
+async function fetchUserRecentEvents() {
+  if (!userId.value) return
+  newsLogLoading.value = true
+  try {
+    const res = await fetch(`${API_BASE}/api/event/getUserRecentEvent?userId=${userId.value}`)
+    const body = await res.json()
+    if (body.code !== 200 || !Array.isArray(body.data)) {
+      newsLogList.value = []
+      return
+    }
+    newsLogList.value = body.data
+  } catch (e) {
+    console.error('加载突发事件新闻失败', e)
+    newsLogList.value = []
+  } finally {
+    newsLogLoading.value = false
+  }
+}
+
+function openNewsLogView() {
+  if (currentSubPage.value !== 'stock') {
+    currentSubPage.value = 'stock'
+  }
+  currentBView.value = 'newsLog'
+  currentStock.value = null
+  closeTradeModal()
+  void fetchUserRecentEvents()
+}
+
+function backToStockList() {
+  currentBView.value = 'stockList'
+  currentStock.value = null
+  closeTradeModal()
+}
+
+function toggleLeverageSlider() {
+  showLeverageSlider.value = !showLeverageSlider.value
+}
+
+function confirmLeverage() {
+  ElMessage.info('目前杠杆暂未开放')
+}
+
 function openTradeModal(type) {
-  if (marketClosed.value) return
+  if (marketClosed.value || lunchBreak.value) return
   tradeModal.value = type
   tradeQuantityInput.value = ''
   tradeError.value = ''
@@ -1018,10 +1321,12 @@ function closeTradeModal() {
   tradeModal.value = null
   tradeQuantityInput.value = ''
   tradeError.value = ''
+  showLeverageSlider.value = false
+  leverageValue.value = 1
 }
 
 function validateTradeInput() {
-  const raw = tradeQuantityInput.value.trim()
+  const raw = tradeQtyInputRaw()
   if (!raw) {
     tradeError.value = '股数不能为空'
     return null
@@ -1034,13 +1339,20 @@ function validateTradeInput() {
   if (tradeModal.value === 'sell') {
     const holdQty = currentHolding.value?.quantity ?? 0
     if (qty > holdQty) {
-      tradeError.value = '卖出数量不能超过当前持有数量'
+      tradeError.value = '持股数量不足，无法卖出'
       return null
     }
   }
   if (tradeModal.value === 'buy') {
-    const amount = detailLatestPrice.value * qty
-    if (amount > userMoney.value) {
+    const unitPrice = resolveDetailPrice()
+    if (!unitPrice || unitPrice <= 0) {
+      tradeError.value = '暂无有效股价，请等待行情更新'
+      return null
+    }
+    const tradeTotal = unitPrice * qty
+    const handFee = +(tradeTotal * BUY_HAND_FEE_RATE).toFixed(2)
+    const actualDebit = +(tradeTotal + handFee).toFixed(2)
+    if (actualDebit > userMoney.value) {
       tradeError.value = '可用资金不足，无法完成买入'
       return null
     }
@@ -1049,49 +1361,91 @@ function validateTradeInput() {
   return qty
 }
 
-function confirmTrade() {
+async function confirmTrade() {
   if (!currentStock.value || !tradeModal.value) return
+  if (!userId.value) {
+    tradeError.value = '请先登录'
+    return
+  }
   const qty = validateTradeInput()
   if (qty === null) return
 
-  const price = getLatestPrice(currentStock.value.code)
-  const amount = +(price * qty).toFixed(2)
-  const { code, name } = currentStock.value
-
-  if (tradeModal.value === 'buy') {
-    userMoney.value = +(userMoney.value - amount).toFixed(2)
-    const existing = holdings.value.find((h) => h.code === code)
-    if (existing) {
-      const totalQty = existing.quantity + qty
-      existing.avgPrice = +(
-        (existing.avgPrice * existing.quantity + price * qty) /
-        totalQty
-      ).toFixed(2)
-      existing.quantity = totalQty
-    } else {
-      holdings.value.push({ code, name, quantity: qty, avgPrice: price })
-    }
-    console.log('[交易] 买入', { code, name, quantity: qty, price, amount, type: 'buy' })
-    alert('买入成功')
-  } else {
-    userMoney.value = +(userMoney.value + amount).toFixed(2)
-    const existing = holdings.value.find((h) => h.code === code)
-    if (existing) {
-      existing.quantity -= qty
-      if (existing.quantity <= 0) {
-        holdings.value = holdings.value.filter((h) => h.code !== code)
-      }
-    }
-    console.log('[交易] 卖出', { code, name, quantity: qty, price, amount, type: 'sell' })
-    alert('卖出成功')
+  const price = resolveDetailPrice()
+  if (!price || price <= 0) {
+    tradeError.value = '暂无有效股价，请等待行情更新'
+    return
   }
 
-  syncUserAssets()
-  closeTradeModal()
+  const { code } = currentStock.value
+
+  try {
+    if (tradeModal.value === 'buy') {
+      const { data: body } = await axios.post(`${API_BASE}/api/stock/buyStock`, {
+        userId: userId.value,
+        stockCode: code,
+        buyCount: qty,
+        handFeeRate: BUY_HAND_FEE_RATE,
+      })
+      if (body.code !== 200) {
+        tradeError.value = body.msg || '买入失败'
+        return
+      }
+      ElMessage.success('买入成功')
+      closeTradeModal()
+      await fetchMyAsset()
+      return
+    }
+
+    const { data: body } = await axios.post(`${API_BASE}/api/stock/sellStock`, {
+      userId: userId.value,
+      stockCode: code,
+      sellCount: qty,
+    })
+    if (body.code !== 200) {
+      tradeError.value = body.msg || '卖出失败'
+      return
+    }
+    ElMessage.success('卖出成功')
+    closeTradeModal()
+    await fetchMyAsset()
+  } catch (err) {
+    const backendMsg = err?.response?.data?.msg
+    tradeError.value = backendMsg || '无法连接后端，请确认 Spring Boot 已启动'
+  }
 }
 
-function nextTradingDay() {
-  console.log('模拟推进到下一个交易日')
+async function nextTradingDay() {
+  if (!userId.value) {
+    alert('请先登录')
+    return
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/game/nextTradeDay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId.value,
+        currentGameDate: gameDate.value,
+      }),
+    })
+    const body = await res.json()
+    if (body.code !== 200) {
+      alert(body.msg || '切换交易日失败')
+      return
+    }
+    isPaused.value = false
+    gameDate.value = body.data.gameDate
+    gameTime.value = body.data.gameTime
+    marketClosed.value = false
+    lunchBreak.value = false
+    stopLunchResumeTimer()
+    resetStockChartForNewTradingDay()
+    persistSessionGameState()
+    await refreshMarketData()
+    startGameTimer()
+  } catch {
+    alert('无法连接后端，请确认 Spring Boot 已启动')
+  }
 }
 
 function logout() {
@@ -1100,19 +1454,12 @@ function logout() {
   router.push('/login')
 }
 
-function goHoldings() {
-  router.push('/holdings')
-}
-
-function toggleNews() {
-  showNews.value = !showNews.value
-}
-
 function selectSubPage(page) {
   currentSubPage.value = page
   if (page === 'stock') {
-    showNews.value = false
+    /* keep current B view */
   } else {
+    currentBView.value = 'stockList'
     currentStock.value = null
     closeTradeModal()
   }
@@ -1120,7 +1467,9 @@ function selectSubPage(page) {
 
 function selectIndustry(key) {
   currentIndustry.value = key
-  showNews.value = false
+  if (currentBView.value !== 'stockDetail') {
+    currentBView.value = 'stockList'
+  }
 }
 
 function loadUserInfo() {
@@ -1140,15 +1489,43 @@ function loadUserInfo() {
   }
 }
 
-function bootstrapGameSession() {
-  initStockPrices()
-  syncUserAssets()
-  initialTotalAsset.value = userAsset.value
-  startGameTimer()
+async function bootstrapGameSession() {
+  if (!userId.value) {
+    alert('请先登录')
+    router.push('/login')
+    return
+  }
+  loadSessionGameState()
+  stockPrices.value = {}
+  stockChartData.value = {}
+  chartRenderKey.value += 1
+  await loadUserStockCatalog()
+  await fetchMyAsset()
+
+  if (lunchBreak.value || gameTime.value === MORNING_CLOSE_TIME) {
+    lunchBreak.value = true
+    await refreshMarketData({ requestGameTime: LUNCH_END_TIME })
+  } else {
+    await refreshMarketData()
+  }
+
+  if (!marketClosed.value && !lunchBreak.value) {
+    startGameTimer()
+  } else if (lunchBreak.value) {
+    scheduleLunchResumeCall()
+  }
 }
 
 onMounted(() => {
   loadUserInfo()
+  username.value = localStorage.getItem('username') || username.value
+
+  const probRaw = sessionStorage.getItem('gameProbability')
+  if (probRaw !== null && probRaw !== '') {
+    const n = Number(probRaw)
+    eventProbability.value = Number.isNaN(n) ? null : n
+  }
+
   updateTime()
   timeTimer = setInterval(updateTime, 1000)
   bootstrapGameSession()
@@ -1160,6 +1537,7 @@ onUnmounted(() => {
     timeTimer = null
   }
   stopGameTimer()
+  stopLunchResumeTimer()
 })
 </script>
 
@@ -1211,11 +1589,87 @@ onUnmounted(() => {
   color: #1e293b;
 }
 
+.closed-hint {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: #f1f5f9;
+}
+
+.paused-hint {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d4ed8;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+}
+
+.lunch-hint {
+  font-size: 13px;
+  font-weight: 700;
+  color: #c2410c;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
+}
+
+.paused-banner {
+  flex: 1 1 100%;
+  width: 100%;
+  margin: 0;
+  padding: 12px 16px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.lunch-banner {
+  flex: 1 1 100%;
+  width: 100%;
+  margin: 0;
+  padding: 12px 16px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #c2410c;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.market-lunch-tag {
+  font-size: 13px;
+  color: #c2410c;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #ffedd5;
+}
+
 .top-center {
   flex: 1;
   display: flex;
   justify-content: center;
   min-width: 140px;
+}
+
+.btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .top-right {
@@ -1422,6 +1876,7 @@ onUnmounted(() => {
 
 .stock-panel {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   flex: 1;
   min-height: 360px;
@@ -1587,6 +2042,65 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
+.btn-leverage {
+  min-width: 120px;
+  padding: 12px 20px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-leverage:hover {
+  background: #fef3c7;
+}
+
+.modal-leverage-btn {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.leverage-panel {
+  max-width: 100%;
+  margin: 12px 0 0;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.leverage-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leverage-label {
+  font-size: 14px;
+  color: #475569;
+  font-weight: 500;
+}
+
+.btn-leverage-confirm {
+  margin-top: 12px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #42b883;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-leverage-confirm:hover {
+  background: #33a06f;
+}
+
 .btn-buy {
   min-width: 120px;
   padding: 12px 28px;
@@ -1632,6 +2146,38 @@ onUnmounted(() => {
 .table-wrap {
   overflow: auto;
   flex: 1;
+}
+
+.hold-empty {
+  margin: 48px 0;
+  text-align: center;
+  font-size: 16px;
+  color: #64748b;
+}
+
+.hold-table-wrap {
+  flex: 1;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.hold-el-table {
+  width: 100%;
+  font-size: 13px;
+}
+
+.hold-el-table :deep(.el-table__header th) {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.hold-el-table :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.hold-el-table :deep(.el-table__row:hover) {
+  background: #f1f5f9 !important;
 }
 
 .stock-table {
@@ -1758,6 +2304,19 @@ onUnmounted(() => {
   margin: 12px 0 0;
   font-size: 14px;
   color: #64748b;
+}
+
+.modal-hint-strong {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.event-dialog-body {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: #334155;
+  white-space: pre-line;
 }
 
 .modal-actions {

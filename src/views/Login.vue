@@ -35,12 +35,13 @@
 
 <script setup>
 import { ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 
+const router = useRouter()
 const account = ref('')
 const password = ref('')
 
-const handleLogin = () => {
+const handleLogin = async () => {
   if (!account.value.trim()) {
     alert('账号不能为空')
     return
@@ -49,10 +50,41 @@ const handleLogin = () => {
     alert('密码不能为空')
     return
   }
-  console.log({
-    account: account.value.trim(),
-    password: password.value,
-  })
+
+  try {
+    const res = await fetch('http://localhost:8080/api/user/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: account.value.trim(),
+        password: password.value,
+      }),
+    })
+    const body = await res.json()
+    if (body.code !== 200) {
+      alert(body.msg || '登录失败')
+      return
+    }
+    localStorage.setItem('token', body.data.token)
+    localStorage.setItem('userId', String(body.data.userId))
+    localStorage.setItem('username', body.data.username)
+
+    const archiveRes = await fetch(
+      `http://localhost:8080/api/user/checkHasGameArchive?userId=${body.data.userId}`,
+    )
+    const archiveBody = await archiveRes.json()
+    if (archiveBody.code !== 200) {
+      alert(archiveBody.msg || '查询存档失败')
+      return
+    }
+    if (archiveBody.data?.hasArchive) {
+      router.push('/game')
+    } else {
+      router.push('/home')
+    }
+  } catch {
+    alert('无法连接后端，请确认 Spring Boot 已启动')
+  }
 }
 </script>
 

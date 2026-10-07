@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.UserInfoMapper">
+
+    <resultMap id="UserInfoMap" type="com.stocksim.entity.UserInfo">
+        <id column="user_id" property="userId"/>
+        <result column="username" property="username"/>
+        <result column="money" property="money"/>
+        <result column="game_time" property="gameTime"/>
+        <result column="game_date" property="gameDate"/>
+        <result column="difficulty" property="difficulty"/>
+    </resultMap>
+
+    <select id="selectByUserId" resultMap="UserInfoMap">
+        SELECT user_id, username, money, game_time, game_date, difficulty
+        FROM userinfo
+        WHERE user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <insert id="insert">
+        INSERT INTO userinfo (user_id, username, money, game_time, game_date, difficulty)
+        VALUES (#{userId}, #{username}, #{money}, #{gameTime}, #{gameDate}, #{difficulty})
+    </insert>
+
+    <update id="updateGameData">
+        UPDATE userinfo
+        SET money = #{money},
+            game_time = #{gameTime},
+            game_date = #{gameDate},
+            difficulty = #{difficulty},
+            username = #{username}
+        WHERE user_id = #{userId}
+    </update>
+
+    <update id="updateGameDate">
+        UPDATE userinfo SET game_date = #{gameDate} WHERE user_id = #{userId}
+    </update>
+
+    <update id="updateGameTime">
+        UPDATE userinfo SET game_time = #{gameTime} WHERE user_id = #{userId}
+    </update>
+
+    <update id="updateMoney">
+        UPDATE userinfo SET money = #{money} WHERE user_id = #{userId}
+    </update>
+</mapper>

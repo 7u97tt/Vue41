@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.UserStockPriceMapper">
+
+    <resultMap id="UserStockPriceMap" type="com.stocksim.entity.UserStockPrice">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="stock_name" property="stockName"/>
+        <result column="stock_code" property="stockCode"/>
+        <result column="open_price" property="openPrice"/>
+        <result column="last_trade_price" property="lastTradePrice"/>
+    </resultMap>
+
+    <select id="selectByUserId" resultMap="UserStockPriceMap">
+        SELECT id, user_id, stock_name, stock_code, open_price, last_trade_price
+        FROM user_stock_price
+        WHERE user_id = #{userId}
+        ORDER BY stock_code
+    </select>
+
+    <select id="selectByUserIdAndStockCode" resultMap="UserStockPriceMap">
+        SELECT id, user_id, stock_name, stock_code, open_price, last_trade_price
+        FROM user_stock_price
+        WHERE user_id = #{userId} AND stock_code = #{stockCode}
+        LIMIT 1
+    </select>
+
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(1) FROM user_stock_price WHERE user_id = #{userId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_stock_price (user_id, stock_name, stock_code, open_price, last_trade_price)
+        VALUES (#{userId}, #{stockName}, #{stockCode}, #{openPrice}, #{lastTradePrice})
+    </insert>
+
+    <insert id="batchInsert">
+        INSERT INTO user_stock_price (user_id, stock_name, stock_code, open_price, last_trade_price)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.userId}, #{item.stockName}, #{item.stockCode}, #{item.openPrice}, #{item.lastTradePrice})
+        </foreach>
+    </insert>
+
+    <update id="updateLastTradePrice">
+        UPDATE user_stock_price
+        SET last_trade_price = #{lastTradePrice}
+        WHERE user_id = #{userId} AND stock_code = #{stockCode}
+    </update>
+
+    <update id="batchUpdateLastTradePrice">
+        UPDATE user_stock_price
+        SET last_trade_price = CASE stock_code
+        <foreach collection="list" item="item">
+            WHEN #{item.stockCode} THEN #{item.lastTradePrice}
+        </foreach>
+        END
+        WHERE user_id = #{userId}
+        AND stock_code IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            #{item.stockCode}
+        </foreach>
+    </update>
+
+    <update id="batchUpdateOpenPrice">
+        UPDATE user_stock_price
+        SET open_price = CASE stock_code
+        <foreach collection="list" item="item">
+            WHEN #{item.stockCode} THEN #{item.openPrice}
+        </foreach>
+        END
+        WHERE user_id = #{userId}
+        AND stock_code IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            #{item.stockCode}
+        </foreach>
+    </update>
+</mapper>

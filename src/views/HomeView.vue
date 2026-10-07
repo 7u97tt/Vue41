@@ -78,6 +78,13 @@ const currentDifficulty = ref('medium')
 const customMoney = ref('')
 const customProbability = ref('')
 
+const difficultyLabel = {
+  easy: '简单',
+  medium: '中等',
+  hard: '困难',
+  custom: '自定义',
+}
+
 const difficultyConfig = {
   easy: {
     money: 10000,
@@ -93,7 +100,9 @@ const difficultyConfig = {
   },
 }
 
-const startGame = () => {
+const API_BASE = 'http://localhost:8080'
+
+const startGame = async () => {
   let money
   let probability
 
@@ -121,12 +130,42 @@ const startGame = () => {
     probability = config.probability
   }
 
-  console.log({
-    difficulty: currentDifficulty.value,
-    money,
-    probability,
-  })
+  const userId = Number(localStorage.getItem('userId'))
+  const username = localStorage.getItem('username')
+  if (!userId || !username) {
+    alert('请先登录')
+    router.push('/login')
+    return
+  }
 
+  const now = new Date()
+  const gameDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const gameTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+  try {
+    const res = await fetch(`${API_BASE}/api/user/saveGameSetting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        username,
+        difficulty: difficultyLabel[currentDifficulty.value],
+        money,
+        gameTime,
+        gameDate,
+      }),
+    })
+    const body = await res.json()
+    if (body.code !== 200) {
+      alert(body.msg || '保存游戏设置失败')
+      return
+    }
+  } catch {
+    alert('无法连接后端，请确认 Spring Boot 已启动')
+    return
+  }
+
+  sessionStorage.setItem('gameProbability', String(probability))
   router.push('/game')
 }
 </script>

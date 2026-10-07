@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.UserStockHoldMapper">
+
+    <resultMap id="UserStockHoldMap" type="com.stocksim.entity.UserStockHold">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="stock_code" property="stockCode"/>
+        <result column="hold_count" property="holdCount"/>
+        <result column="buy_total_cost" property="buyTotalCost"/>
+    </resultMap>
+
+    <select id="selectByUserId" resultMap="UserStockHoldMap">
+        SELECT id, user_id, stock_code, hold_count, buy_total_cost
+        FROM user_stock_hold
+        WHERE user_id = #{userId}
+          AND hold_count > 0
+        ORDER BY stock_code
+    </select>
+
+    <select id="selectByUserIdAndStockCode" resultMap="UserStockHoldMap">
+        SELECT id, user_id, stock_code, hold_count, buy_total_cost
+        FROM user_stock_hold
+        WHERE user_id = #{userId}
+          AND stock_code = #{stockCode}
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_stock_hold (user_id, stock_code, hold_count, buy_total_cost)
+        VALUES (#{userId}, #{stockCode}, #{holdCount}, #{buyTotalCost})
+    </insert>
+
+    <update id="updateHoldCount">
+        UPDATE user_stock_hold
+        SET hold_count = #{holdCount}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateHold">
+        UPDATE user_stock_hold
+        SET hold_count = #{holdCount},
+            buy_total_cost = #{buyTotalCost}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteByUserIdAndStockCode">
+        DELETE FROM user_stock_hold
+        WHERE user_id = #{userId}
+          AND stock_code = #{stockCode}
+    </delete>
+</mapper>

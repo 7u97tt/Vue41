@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.UserMapper">
+
+    <resultMap id="UserMap" type="com.stocksim.entity.User">
+        <id column="user_id" property="userId"/>
+        <result column="username" property="username"/>
+        <result column="password" property="password"/>
+    </resultMap>
+
+    <select id="selectByUsername" resultMap="UserMap">
+        SELECT user_id, username, password
+        FROM `user`
+        WHERE username = #{username}
+        LIMIT 1
+    </select>
+
+    <select id="selectById" resultMap="UserMap">
+        SELECT user_id, username, password
+        FROM `user`
+        WHERE user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <select id="existsUserInfoByUserId" resultType="boolean">
+        SELECT COUNT(1) > 0
+        FROM userinfo
+        WHERE user_id = #{userId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="userId" keyColumn="user_id">
+        INSERT INTO `user` (username, password)
+        VALUES (#{username}, #{password})
+    </insert>
+</mapper>

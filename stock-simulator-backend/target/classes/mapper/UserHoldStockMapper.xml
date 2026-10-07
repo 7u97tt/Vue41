@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.UserHoldStockMapper">
+
+    <resultMap id="HoldMap" type="com.stocksim.entity.UserHoldStock">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="stock_code" property="stockCode"/>
+        <result column="stock_name" property="stockName"/>
+        <result column="quantity" property="quantity"/>
+        <result column="avg_price" property="avgPrice"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <select id="selectByUserId" resultMap="HoldMap">
+        SELECT * FROM user_hold_stock WHERE user_id = #{userId} AND quantity > 0
+        ORDER BY update_time DESC
+    </select>
+
+    <select id="selectByUserAndCode" resultMap="HoldMap">
+        SELECT * FROM user_hold_stock
+        WHERE user_id = #{userId} AND stock_code = #{stockCode} LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_hold_stock (user_id, stock_code, stock_name, quantity, avg_price)
+        VALUES (#{userId}, #{stockCode}, #{stockName}, #{quantity}, #{avgPrice})
+    </insert>
+
+    <update id="update">
+        UPDATE user_hold_stock
+        SET quantity = #{quantity}, avg_price = #{avgPrice}, stock_name = #{stockName}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM user_hold_stock WHERE id = #{id}
+    </delete>
+</mapper>

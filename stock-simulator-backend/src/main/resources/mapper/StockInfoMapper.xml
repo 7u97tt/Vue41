@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.stocksim.mapper.StockInfoMapper">
+
+    <resultMap id="StockMap" type="com.stocksim.entity.StockInfo">
+        <id column="id" property="id"/>
+        <result column="stock_code" property="stockCode"/>
+        <result column="stock_name" property="stockName"/>
+        <result column="industry" property="industry"/>
+        <result column="history_prices" property="historyPrices"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <select id="selectDistinctIndustries" resultType="string">
+        SELECT DISTINCT industry FROM stock_info ORDER BY industry
+    </select>
+
+    <select id="selectByIndustry" resultMap="StockMap">
+        SELECT id, stock_code, stock_name, industry, create_time
+        FROM stock_info WHERE industry = #{industry} ORDER BY stock_code
+    </select>
+
+    <select id="selectByCode" resultMap="StockMap">
+        SELECT * FROM stock_info WHERE stock_code = #{stockCode} LIMIT 1
+    </select>
+</mapper>
