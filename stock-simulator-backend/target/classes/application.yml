@@ -1,4 +1,5 @@
 server:
+  address: 0.0.0.0
   port: 8080
 
 spring:
@@ -15,7 +16,7 @@ jedis:
   port: 6379
   password:
   database: 0
-  timeout: 3000
+  timeout: 8000
   pool:
     max-total: 8
     max-idle: 8
@@ -31,3 +32,5 @@ mybatis:
 logging:
   level:
     com.stocksim.mapper: debug
+    org.springframework.web.servlet.DispatcherServlet: debug
+    org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping: info

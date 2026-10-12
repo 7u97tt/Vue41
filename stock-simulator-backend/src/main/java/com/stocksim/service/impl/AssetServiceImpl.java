@@ -7,7 +7,9 @@ import com.stocksim.mapper.UserStockHoldMapper;
 import com.stocksim.mapper.UserStockPriceMapper;
 import com.stocksim.entity.UserStockPrice;
 import com.stocksim.service.AssetService;
+import com.stocksim.service.GameClockService;
 import com.stocksim.service.UserMoneyService;
+import com.stocksim.vo.GameClockVO;
 import com.stocksim.util.UserStockPriceRedisUtil;
 import com.stocksim.vo.HoldAssetItemVO;
 import com.stocksim.vo.MyAssetVO;
@@ -31,6 +33,7 @@ public class AssetServiceImpl implements AssetService {
     private final UserStockPriceRedisUtil userStockPriceRedisUtil;
     private final UserStockPriceMapper userStockPriceMapper;
     private final UserMapper userMapper;
+    private final GameClockService gameClockService;
 
     @Override
     public MyAssetVO getMyAsset(Long userId) {
@@ -106,7 +109,11 @@ public class AssetServiceImpl implements AssetService {
                     .setScale(2, RoundingMode.HALF_UP);
         }
 
+        GameClockVO clock = gameClockService.resolve(userId);
+
         MyAssetVO vo = new MyAssetVO();
+        vo.setGameDate(clock.getGameDate());
+        vo.setGameTime(clock.getGameTime());
         vo.setAvailableMoney(availableMoney);
         vo.setHoldMarketValue(holdMarketValue);
         vo.setTotalAsset(totalAsset);

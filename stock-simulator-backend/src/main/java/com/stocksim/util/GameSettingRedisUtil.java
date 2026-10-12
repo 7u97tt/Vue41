@@ -46,6 +46,11 @@ public class GameSettingRedisUtil {
         return jedisUtil.hget(userId + "info", field);
     }
 
+    /** 一次读取 money/time/date，供游戏时钟等使用 */
+    public Map<String, String> getUserInfoMap(Long userId) {
+        return jedisUtil.hgetAll(userId + "info");
+    }
+
     public void updateMoney(Long userId, BigDecimal money) {
         jedisUtil.hset(userId + "info", "money", money.setScale(2, RoundingMode.HALF_UP).toPlainString());
     }

@@ -142,6 +142,7 @@
 import axios from 'axios'
 import { onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { apiUrl } from '@/config/api.js'
 
 // #region agent log
 onMounted(() => {
@@ -160,8 +161,6 @@ onMounted(() => {
   }).catch(() => {})
 })
 // #endregion
-
-const API_BASE = 'http://localhost:8080'
 
 const router = useRouter()
 
@@ -214,7 +213,7 @@ async function handleRegister() {
 
   submitting.value = true
   try {
-    const { data: body } = await axios.post(`${API_BASE}/api/user/register`, {
+    const { data: body } = await axios.post(apiUrl('/api/user/register'), {
       username: username.value.trim(),
       password: password.value,
       confirmPassword: confirmPassword.value,

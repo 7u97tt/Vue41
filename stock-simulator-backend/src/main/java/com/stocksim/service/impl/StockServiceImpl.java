@@ -13,8 +13,10 @@ import com.stocksim.mapper.StockInfoMapper;
 import com.stocksim.mapper.UserInfoMapper;
 import com.stocksim.mapper.UserMapper;
 import com.stocksim.mapper.UserStockPriceMapper;
+import com.stocksim.service.GameClockService;
 import com.stocksim.service.StockEventService;
 import com.stocksim.service.StockService;
+import com.stocksim.vo.GameClockVO;
 import com.stocksim.util.GameSettingRedisUtil;
 import com.stocksim.util.StockPriceCalcUtil;
 import com.stocksim.util.UserStockPriceRedisUtil;
@@ -55,6 +57,7 @@ public class StockServiceImpl implements StockService {
     private final UserStockPriceRedisUtil userStockPriceRedisUtil;
     private final GameSettingRedisUtil gameSettingRedisUtil;
     private final StockEventService stockEventService;
+    private final GameClockService gameClockService;
 
     @Override
     public List<String> listIndustries() {
@@ -97,8 +100,12 @@ public class StockServiceImpl implements StockService {
         Long userId = dto.getUserId();
         requireUser(userId);
 
-        LocalTime currentTime = parseGameTime(dto.getGameTime().trim());
-        String gameDate = dto.getGameDate().trim();
+        GameClockVO clock = gameClockService.resolve(userId);
+        String gameDate = StringUtils.hasText(clock.getGameDate())
+                ? clock.getGameDate()
+                : dto.getGameDate().trim();
+        String tickTimeStr = resolveTickGameTime(clock.getGameTime(), dto.getGameTime());
+        LocalTime currentTime = parseGameTime(tickTimeStr);
 
         List<UserStockPrice> dbStocks = userStockPriceMapper.selectByUserId(userId);
         if (dbStocks.isEmpty()) {
@@ -269,6 +276,22 @@ public class StockServiceImpl implements StockService {
     private void syncGameTime(Long userId, String gameTime) {
         userInfoMapper.updateGameTime(userId, gameTime);
         gameSettingRedisUtil.updateUserInfoTime(userId, gameTime);
+    }
+
+    /** 服务端时钟为准；仅允许前端 11:30→13:00 午休跳转 */
+    private static String resolveTickGameTime(String serverTime, String clientTime) {
+        if (!StringUtils.hasText(clientTime)) {
+            return StringUtils.hasText(serverTime) ? serverTime.trim() : "09:30";
+        }
+        String client = clientTime.trim();
+        if (!StringUtils.hasText(serverTime)) {
+            return client;
+        }
+        String server = serverTime.trim();
+        if ("13:00".equals(client) && "11:30".equals(server)) {
+            return client;
+        }
+        return server;
     }
 
     private Map<String, String> toStringMap(Map<String, BigDecimal> prices) {

@@ -36,6 +36,7 @@
 <script setup>
 import { ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { apiUrl } from '@/config/api.js'
 
 const router = useRouter()
 const account = ref('')
@@ -51,8 +52,9 @@ const handleLogin = async () => {
     return
   }
 
+  const loginUrl = apiUrl('/api/user/login')
   try {
-    const res = await fetch('http://localhost:8080/api/user/login', {
+    const res = await fetch(loginUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -60,7 +62,19 @@ const handleLogin = async () => {
         password: password.value,
       }),
     })
-    const body = await res.json()
+    const rawText = await res.text()
+    let body
+    try {
+      body = JSON.parse(rawText)
+    } catch {
+      let hint = ''
+      if (res.status === 403) {
+        hint =
+          '\n\nHTTP 403 常见原因：\n① 穿透只放了前端，POST /api 被网关拦截 → 请再给本机 8080 映射一个公网端口，并在 .env.local 设置 VITE_API_BASE=http://218.12.120.170:后端端口\n② 请求路径错误（应含 /api/user/login 而非 /login/api/...）'
+      }
+      alert(`接口返回异常 (HTTP ${res.status})\n完整请求：${loginUrl}${hint}`)
+      return
+    }
     if (body.code !== 200) {
       alert(body.msg || '登录失败')
       return
@@ -70,7 +84,7 @@ const handleLogin = async () => {
     localStorage.setItem('username', body.data.username)
 
     const archiveRes = await fetch(
-      `http://localhost:8080/api/user/checkHasGameArchive?userId=${body.data.userId}`,
+      apiUrl(`/api/user/checkHasGameArchive?userId=${body.data.userId}`),
     )
     const archiveBody = await archiveRes.json()
     if (archiveBody.code !== 200) {
@@ -82,8 +96,12 @@ const handleLogin = async () => {
     } else {
       router.push('/home')
     }
-  } catch {
-    alert('无法连接后端，请确认 Spring Boot 已启动')
+  } catch (e) {
+    console.error('login request failed', loginUrl, e)
+    const msg = e?.message ? String(e.message) : '网络错误'
+    alert(
+      `无法完成登录请求：${msg}\n请求地址：${loginUrl}\n\n请确认：Spring Boot 已启动；穿透指向 127.0.0.1:5173；外网打开的是穿透域名而非 localhost。`,
+    )
   }
 }
 </script>

@@ -71,6 +71,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { apiUrl } from '@/config/api.js'
 
 const router = useRouter()
 
@@ -99,8 +100,6 @@ const difficultyConfig = {
     probability: 50,
   },
 }
-
-const API_BASE = 'http://localhost:8080'
 
 const startGame = async () => {
   let money
@@ -143,7 +142,7 @@ const startGame = async () => {
   const gameTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 
   try {
-    const res = await fetch(`${API_BASE}/api/user/saveGameSetting`, {
+    const res = await fetch(apiUrl('/api/user/saveGameSetting'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

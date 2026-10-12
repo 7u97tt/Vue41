@@ -17,4 +17,8 @@ public class MyAssetVO {
     private BigDecimal profitRate;
     /** 持仓明细，供前端「我的持仓」表格 */
     private List<HoldAssetItemVO> holdList;
+    /** 游戏内日期，Redis/MySQL 为准 */
+    private String gameDate;
+    /** 游戏内时间 HH:mm */
+    private String gameTime;
 }

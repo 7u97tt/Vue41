@@ -681,6 +681,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import { apiUrl } from '@/config/api.js'
 import {
   ElSlider,
   ElMessage,
@@ -703,7 +704,6 @@ const BUY_HAND_FEE_RATE = 0.003
 const POINT_COUNT = 50
 const INITIAL_GAME_TIME = '09:30'
 const INITIAL_GAME_DATE = '2020-01-02'
-const API_BASE = 'http://localhost:8080'
 
 /**
  * 前后端约定（A股交易时段，时间跳跃由前端控制）：
@@ -718,6 +718,8 @@ const currentTime = ref('')
 const gameDate = ref('')
 const gameTime = ref('')
 const userId = ref(Number(localStorage.getItem('userId')) || 0)
+/** 退出登录或离开游戏页后为 false，阻止轮询继续打接口 */
+const gameSessionActive = ref(true)
 const marketClosed = ref(false)
 /** 午盘休市等待阶段（已收到 11:30，尚未完成 13:00 跳转请求） */
 const lunchBreak = ref(false)
@@ -1179,8 +1181,7 @@ function loadSessionGameState() {
     const raw = sessionStorage.getItem(sessionKey())
     if (raw) {
       const saved = JSON.parse(raw)
-      if (saved.gameDate) gameDate.value = saved.gameDate
-      if (saved.gameTime) gameTime.value = saved.gameTime
+      // 游戏日期/时间以 Redis+MySQL 为准，见 fetchMyAsset；此处只恢复本标签页交易状态
       if (typeof saved.marketClosed === 'boolean') {
         marketClosed.value = saved.marketClosed
       }
@@ -1192,10 +1193,13 @@ function loadSessionGameState() {
   } catch {
     /* ignore */
   }
-  gameDate.value = INITIAL_GAME_DATE
-  gameTime.value = INITIAL_GAME_TIME
   marketClosed.value = false
   lunchBreak.value = false
+}
+
+function applyServerGameClock(dateStr, timeStr) {
+  if (dateStr) gameDate.value = String(dateStr).trim()
+  if (timeStr) gameTime.value = String(timeStr).trim()
 }
 
 function persistSessionGameState() {
@@ -1219,9 +1223,10 @@ function stopLunchResumeTimer() {
 
 function scheduleLunchResumeCall() {
   stopLunchResumeTimer()
-  if (isPaused.value) return
+  if (isPaused.value || !gameSessionActive.value) return
   lunchResumeTimer = setTimeout(() => {
     lunchResumeTimer = null
+    if (!gameSessionActive.value) return
     refreshMarketData({ requestGameTime: LUNCH_END_TIME })
   }, 2000)
 }
@@ -1237,7 +1242,7 @@ function resolveRequestGameTime(requestGameTime) {
 async function loadUserStockCatalog() {
   if (!userId.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/stock/getUserAllStock?userId=${userId.value}`)
+    const res = await fetch(apiUrl(`/api/stock/getUserAllStock?userId=${userId.value}`))
     const body = await res.json()
     if (body.code !== 200 || !Array.isArray(body.data)) return
 
@@ -1259,10 +1264,11 @@ async function loadUserStockCatalog() {
 async function fetchMyAsset() {
   if (!userId.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/asset/getMyAsset?userId=${userId.value}`)
+    const res = await fetch(apiUrl(`/api/asset/getMyAsset?userId=${userId.value}`))
     const body = await res.json()
     if (body.code !== 200 || !body.data) return
     const d = body.data
+    applyServerGameClock(d.gameDate, d.gameTime)
     userMoney.value = Number(d.availableMoney)
     holdMarketValue.value = Number(d.holdMarketValue ?? 0)
     userAsset.value = Number(d.totalAsset)
@@ -1293,7 +1299,7 @@ async function fetchMyAsset() {
 }
 
 async function refreshMarketData(options = {}) {
-  if (!userId.value || isPaused.value) return
+  if (!gameSessionActive.value || !userId.value || isPaused.value) return
   await Promise.all([
     fetchMyAsset(),
     callQueryAndUpdateStockPrice(options),
@@ -1301,12 +1307,12 @@ async function refreshMarketData(options = {}) {
 }
 
 async function callQueryAndUpdateStockPrice(options = {}) {
-  if (!userId.value || marketClosed.value) return
+  if (!gameSessionActive.value || !userId.value || marketClosed.value) return
 
   const effectiveGameTime = resolveRequestGameTime(options.requestGameTime)
 
   try {
-    const res = await fetch(`${API_BASE}/api/stock/queryAndUpdateStockPrice`, {
+    const res = await fetch(apiUrl('/api/stock/queryAndUpdateStockPrice'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1380,8 +1386,12 @@ function stopGameTimer() {
 
 function startGameTimer() {
   stopGameTimer()
-  if (marketClosed.value || lunchBreak.value || isPaused.value) return
+  if (!gameSessionActive.value || marketClosed.value || lunchBreak.value || isPaused.value) return
   gameTimer = setInterval(() => {
+    if (!gameSessionActive.value) {
+      stopGameTimer()
+      return
+    }
     void refreshMarketData()
   }, 2000)
 }
@@ -1540,7 +1550,7 @@ async function fetchUserRecentEvents() {
   }
   newsLogLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/event/getUserRecentEvent?userId=${userId.value}`)
+    const res = await fetch(apiUrl(`/api/event/getUserRecentEvent?userId=${userId.value}`))
     const body = await res.json()
     if (body.code !== 200 || !Array.isArray(body.data)) {
       newsLogList.value = []
@@ -1562,7 +1572,7 @@ async function fetchCanBorrowCount(stockCode) {
   }
   try {
     const res = await fetch(
-      `${API_BASE}/api/broker/getCanBorrow?stockCode=${encodeURIComponent(stockCode)}`,
+      apiUrl(`/api/broker/getCanBorrow?stockCode=${encodeURIComponent(stockCode)}`),
     )
     const body = await res.json()
     brokerCanBorrow.value = body.code === 200 ? Number(body.data) : null
@@ -1583,7 +1593,7 @@ async function fetchUserShortInfo() {
   }
   shortInfoLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/broker/getUserShortInfo?userId=${userId.value}`)
+    const res = await fetch(apiUrl(`/api/broker/getUserShortInfo?userId=${userId.value}`))
     const body = await res.json()
     if (body.code !== 200 || !Array.isArray(body.data)) {
       shortInfoList.value = []
@@ -1638,7 +1648,7 @@ async function submitBorrowStock() {
     return
   }
   try {
-    const { data: body } = await axios.post(`${API_BASE}/api/broker/borrowStock`, {
+    const { data: body } = await axios.post(apiUrl('/api/broker/borrowStock'), {
       userId: userId.value,
       stockCode: brokerBorrowStockCode.value,
       borrowCount: qty,
@@ -1689,7 +1699,7 @@ async function confirmShortSell() {
   }
   const code = brokerShortSellModal.value.stockCode
   try {
-    const { data: body } = await axios.post(`${API_BASE}/api/broker/shortSell`, {
+    const { data: body } = await axios.post(apiUrl('/api/broker/shortSell'), {
       userId: userId.value,
       stockCode: code,
       sellCount: qty,
@@ -1720,7 +1730,7 @@ async function confirmReturnStock() {
   }
   const code = brokerReturnModal.value.stockCode
   try {
-    const { data: body } = await axios.post(`${API_BASE}/api/broker/returnStock`, {
+    const { data: body } = await axios.post(apiUrl('/api/broker/returnStock'), {
       userId: userId.value,
       stockCode: code,
       returnCount: qty,
@@ -1756,7 +1766,7 @@ async function fetchOperateLogs() {
   }
   operateLogLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/log/getOperateLog?userId=${userId.value}`)
+    const res = await fetch(apiUrl(`/api/log/getOperateLog?userId=${userId.value}`))
     const body = await res.json()
     if (body.code !== 200 || !Array.isArray(body.data)) {
       operateLogList.value = []
@@ -1866,7 +1876,7 @@ async function confirmTrade() {
 
   try {
     if (tradeModal.value === 'buy') {
-      const { data: body } = await axios.post(`${API_BASE}/api/stock/buyStock`, {
+      const { data: body } = await axios.post(apiUrl('/api/stock/buyStock'), {
         userId: userId.value,
         stockCode: code,
         buyCount: qty,
@@ -1882,7 +1892,7 @@ async function confirmTrade() {
       return
     }
 
-    const { data: body } = await axios.post(`${API_BASE}/api/stock/sellStock`, {
+    const { data: body } = await axios.post(apiUrl('/api/stock/sellStock'), {
       userId: userId.value,
       stockCode: code,
       sellCount: qty,
@@ -1906,7 +1916,7 @@ async function nextTradingDay() {
     return
   }
   try {
-    const res = await fetch(`${API_BASE}/api/game/nextTradeDay`, {
+    const res = await fetch(apiUrl('/api/game/nextTradeDay'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1934,9 +1944,18 @@ async function nextTradingDay() {
   }
 }
 
+function teardownGameSession() {
+  gameSessionActive.value = false
+  userId.value = 0
+  stopGameTimer()
+  stopLunchResumeTimer()
+}
+
 function logout() {
+  teardownGameSession()
   localStorage.removeItem('token')
   localStorage.removeItem('userInfo')
+  localStorage.removeItem('userId')
   router.push('/login')
 }
 
@@ -1987,6 +2006,8 @@ async function bootstrapGameSession() {
   chartRenderKey.value += 1
   await loadUserStockCatalog()
   await fetchMyAsset()
+  if (!gameDate.value) gameDate.value = INITIAL_GAME_DATE
+  if (!gameTime.value) gameTime.value = INITIAL_GAME_TIME
 
   if (lunchBreak.value || gameTime.value === MORNING_CLOSE_TIME) {
     lunchBreak.value = true
@@ -2003,6 +2024,8 @@ async function bootstrapGameSession() {
 }
 
 onMounted(() => {
+  gameSessionActive.value = true
+  userId.value = Number(localStorage.getItem('userId')) || 0
   loadUserInfo()
   username.value = localStorage.getItem('username') || username.value
 
@@ -2012,12 +2035,11 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  teardownGameSession()
   if (timeTimer) {
     clearInterval(timeTimer)
     timeTimer = null
   }
-  stopGameTimer()
-  stopLunchResumeTimer()
 })
 </script>
 
